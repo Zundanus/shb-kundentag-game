@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>LEVEL UP! — SHB Kundentag 2026</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  background:#0d0d2e;
+  display:flex;align-items:center;justify-content:center;
+  height:100dvh;overflow:hidden;
+  touch-action:none;
+  font-family:'Press Start 2P',monospace;
+}
+#wrap{position:relative;display:flex;flex-direction:column;align-items:center}
+canvas{display:block;image-rendering:pixelated}
+#ctrl{
+  display:none;
+  position:absolute;bottom:0;left:0;right:0;
+  height:110px;pointer-events:none;
+}
+.btn{
+  position:absolute;
+  border:3px solid #f5c400;border-radius:6px;
+  background:rgba(245,196,0,.12);color:#f5c400;
+  font-family:'Press Start 2P',monospace;
+  display:flex;align-items:center;justify-content:center;
+  pointer-events:all;user-select:none;
+  -webkit-tap-highlight-color:transparent;cursor:pointer;
+}
+.btn:active{background:rgba(245,196,0,.38)}
+#bL{bottom:10px;left:8px;width:58px;height:58px;font-size:22px}
+#bU{bottom:76px;left:42px;width:58px;height:30px;font-size:14px}
+#bR{bottom:10px;left:76px;width:58px;height:58px;font-size:22px}
+#bJ{bottom:10px;right:8px;width:88px;height:58px;font-size:8px;line-height:1.6}
+</style>
+</head>
+<body>
+<div id="wrap">
+<canvas id="c"></canvas>
+<div id="ctrl">
+  <div class="btn" id="bL">◀</div>
+  <div class="btn" id="bU">▲</div>
+  <div class="btn" id="bR">▶</div>
+  <div class="btn" id="bJ">JUMP<br>↑</div>
+</div>
+</div>
+<script>
+/* ============================================================
+   LEVEL UP! — SHB Kundentag 2026
+   Demo v0.1 · Studio Zundanus / Ravi Kohli · 2026-06-27
+   Single-file, no build chain, mobile-ready
+   ============================================================ */
+
+const cv = document.getElementById('c');
+const cx = cv.getContext('2d');
+const ctrl = document.getElementById('ctrl');
+
+// --- Game world size ---
+const GW = 400, GH = 560;
+
+// --- Responsive scaling ---
+function resize() {
+  const ctrlH = ('ontouchstart' in window) ? 110 : 0;
+  const s = Math.min(window.innerWidth / GW, window.innerHeight / (GH + ctrlH));
+  cv.width = GW; cv.height = GH;
+  cv.style.width  = (GW * s) + 'px';
+  cv.style.height = (GH * s) + 'px';
+  const wrap = document.getElementById('wrap');
+  wrap.style.width  = (GW * s) + 'px';
+  wrap.style.height = ((GH + ctrlH) * s) + 'px';
+  ctrl.style.width  = (GW * s) + 'px';
+  ctrl.style.height = (ctrlH * s) + 'px';
+  ctrl.style.transform = `scale(${s})`;
+  ctrl.style.transformOrigin = 'bottom left';
+  if ('ontouchstart' in window) ctrl.style.display = 'block';
+}
+window.addEventListener('resize', resize);
+resize();
+
+// --- Palette (SHB) ---
+const C = {
+  bg:    '#1a1a4e',
+  bgd:   '#0d0d2e',
+  yel:   '#f5c400',
+  yeld:  '#c97d00',
+  blu:   '#4a9fd4',
+  blul:  '#6bbde0',
+  wht:   '#ffffff',
+  red:   '#ff4444',
+  purp:  '#7c3aed',
+  skin:  '#f4a261',
+  dbl:   '#1e40af',
+  grid:  'rgba(74,159,212,0.06)',
+};
+
+// --- Layout ---
+// Platforms [{x,y,w,h,dir}]  dir: barrel roll direction (1=right, -1=left)
+const PLATS = [
+  {x:0,   y:510, w:400, h:10, dir:-1},  // P0 bottom → rolls left, off screen
+  {x:10,  y:400, w:372, h:10, dir: 1},  // P1 (rolls right → off right edge)
+  {x:18,  y:290, w:372, h:10, dir:-1},  // P2 (rolls left  → off left edge)
+  {x:10,  y:180, w:372, h:10, dir: 1},  // P3 (rolls right → off right edge)
+  {x:18,  y: 70, w:372, h:10, dir:-1},  // P4 top (rolls left from spawn)
+];
+
+// Ladders [{x, yt, yb}]  yt=top of ladder, yb=bottom of ladder
+const LW = 18;
+const LADDERS = [
+  {x:346, yt:400, yb:510},  // L0: right side P0→P1
+  {x: 36, yt:290, yb:400},  // L1: left side  P1→P2
+  {x:346, yt:180, yb:290},  // L2: right side P2→P3
+  {x: 36, yt: 70, yb:180},  // L3: left side  P3→P4
+];
+
+// Barrel spawn: top platform, right side, rolls left
+const BSPAWN = {x:358, y:46}; // y = P4.y(70) - barrel_h(24)
+
+// --- Input ---
+const K = {};
+window.addEventListener('keydown', e => { K[e.code] = true; });
+window.addEventListener('keyup',   e => { K[e.code] = false; });
+
+function mkBtn(id, code) {
+  const el = document.getElementById(id);
+  const on  = e => { e.preventDefault(); K[code] = true; };
+  const off = e => { e.preventDefault(); K[code] = false; };
+  el.addEventListener('pointerdown',  on);
+  el.addEventListener('pointerup',    off);
+  el.addEventListener('pointercancel',off);
+  el.addEventListener('pointerleave', off);
+}
+mkBtn('bL','ArrowLeft'); mkBtn('bR','ArrowRight');
+mkBtn('bU','ArrowUp');   mkBtn('bJ','Space');
+
+const L  = () => K.ArrowLeft  || K.KeyA;
+const R  = () => K.ArrowRight || K.KeyD;
+const UP = () => K.ArrowUp    || K.KeyW;
+const DN = () => K.ArrowDown  || K.KeyS;
+const JP = () => K.Space;
+
+// --- Entities ---
+const P = { // player
+  x:30, y:470, w:22, h:30,
+  vx:0, vy:0,
+  onGround:false, climbing:false,
+  dead:false, deathTimer:0,
+  jumpLock:false, frame:0, frameT:0,
+  highestPlat: 0,  // highest platform index reached this life
+};
+
+let barrels = [];
+let spawnT = 1.5, spawnI = 3.0;
+
+// --- Game state ---
+let state  = 'menu';  // menu | play | winanim | over
+let score  = 0, scoreAcc = 0, level = 1, lives = 3;
+let HS     = +localStorage.getItem('shb_hs') || 0;
+let hitFlash = 0, winAnim = 0, winBonus = 0;
+let floaters = []; // schwebende Punkteanzeigen {x,y,text,life}
+function addFloat(x, y, text) { floaters.push({x, y, text, life: 1.2}); }
+
+// --- Helper ---
+function barrelSpeed() { return 72 + level * 13; }
+
+function ladderAt(e) {
+  for (let i = 0; i < LADDERS.length; i++) {
+    const l = LADDERS[i];
+    if (e.x + e.w > l.x + 2 && e.x < l.x + LW - 2 &&
+        e.y + e.h > l.yt    && e.y < l.yb)
+      return i;
+  }
+  return -1;
+}
+
+// --- Init / Reset ---
+function initGame() {
+  resetPlayer();
+  barrels = []; spawnT = 1.5;
+  spawnI = Math.max(1.1, 3.0 - (level - 1) * 0.28);
+  score = 0; scoreAcc = 0; hitFlash = 0; winAnim = 0; floaters = [];
+  state = 'play';
+}
+function resetPlayer() {
+  P.x=30; P.y=470; P.vx=0; P.vy=0;
+  P.onGround=false; P.climbing=false;
+  P.dead=false; P.deathTimer=0; P.jumpLock=false;
+  P.highestPlat=0;
+}
+function nextLevel() {
+  level++;
+  resetPlayer();
+  barrels=[]; spawnT=1.5;
+  spawnI = Math.max(1.1, 3.0 - (level - 1) * 0.28);
+  hitFlash=0; winAnim=0;
+  state='play';
+}
+
+// --- Spawn barrel ---
+function spawnBarrel() {
+  barrels.push({
+    x: BSPAWN.x, y: BSPAWN.y, w:24, h:24,
+    vx: -barrelSpeed(), vy:0,
+    onGround: true, platIdx: 4,
+    frame: 0, frameT: 0,
+  });
+}
+
+// --- Update player ---
+function updatePlayer(dt) {
+  if (P.dead) {
+    P.deathTimer -= dt;
+    if (P.deathTimer <= 0) {
+      lives--;
+      if (lives <= 0) {
+        state = 'over';
+        if (score > HS) { HS = score; localStorage.setItem('shb_hs', HS); }
+      } else {
+        resetPlayer();
+        barrels = []; spawnT = 1.5; hitFlash = 0;
+      }
+    }
+    return;
+  }
+
+  const li = ladderAt(P);
+
+  // Enter climb going up
+  if (li >= 0 && UP() && !P.climbing) { P.climbing = true; P.vy = 0; }
+
+  // Enter climb going down (standing on platform above ladder top)
+  if (!P.climbing && DN() && P.onGround) {
+    for (let i = 0; i < LADDERS.length; i++) {
+      const l = LADDERS[i];
+      if (P.x + P.w > l.x + 2 && P.x < l.x + LW - 2 &&
+          Math.abs(P.y + P.h - l.yt) < 10) {
+        P.climbing = true; P.onGround = false; P.vy = 0; break;
+      }
+    }
+  }
+
+  // Exit climb if off ladder
+  if (li < 0) P.climbing = false;
+
+  if (P.climbing) {
+    const l = LADDERS[li >= 0 ? li : 0];
+    // Snap to center
+    if (li >= 0) P.x += (l.x + LW / 2 - P.w / 2 - P.x) * 0.25;
+    P.vx = 0;
+    P.vy = UP() ? -88 : DN() ? 85 : 0;
+  } else {
+    P.vx = L() ? -158 : R() ? 158 : 0;
+    P.vy += 900 * dt;
+    if (JP() && P.onGround && !P.jumpLock) {
+      P.vy = -345; P.onGround = false; P.jumpLock = true; // apex ≈65px: clears barrel(24px), stays below upper platform
+    }
+    if (!JP()) P.jumpLock = false;
+  }
+
+  const prevY = P.y;
+  P.x += P.vx * dt;
+  P.y += P.vy * dt;
+  P.x = Math.max(0, Math.min(GW - P.w, P.x));
+
+  // Platform collision (landing only, downward)
+  P.onGround = false;
+  if (!P.climbing && P.vy >= 0) {
+    for (let pi = 0; pi < PLATS.length; pi++) {
+      const p = PLATS[pi];
+      if (prevY + P.h <= p.y + 3 && P.y + P.h >= p.y &&
+          P.x + P.w > p.x + 6 && P.x < p.x + p.w - 6) {
+        P.y = p.y - P.h; P.vy = 0; P.onGround = true;
+        // Neue Plattform-Höhe erreicht → Punkte
+        if (pi > 0 && pi > P.highestPlat) {
+          P.highestPlat = pi;
+          if (pi < 4) {
+            const b = pi * 200;  // P1=200 P2=400 P3=600
+            score += b;
+            addFloat(P.x + P.w/2, P.y - 8, '+' + b);
+          }
+        }
+        // Win! (Ziel oben)
+        if (pi === 4) {
+          winBonus = 1000 + level * 200;
+          score += winBonus;
+          addFloat(GW/2, GH/2 + 40, '+' + winBonus + '!!');
+          winAnim = 1.8; state = 'winanim';
+        }
+        break;
+      }
+    }
+  }
+
+  // Fall off bottom
+  if (P.y > GH + 60) { P.x=30; P.y=470; P.vy=0; }
+
+  // Animate frame
+  P.frameT += dt;
+  if (P.frameT > 0.13) { P.frame = (P.frame + 1) % 4; P.frameT = 0; }
+
+  // Score (time-based) — Float-Akkumulator verhindert dass Math.floor jeden Frame 0 ergibt
+  scoreAcc += dt * 10 * level;
+  const pts = scoreAcc | 0;
+  if (pts > 0) { score += pts; scoreAcc -= pts; }
+}
+
+// --- Update barrels ---
+function updateBarrels(dt) {
+  spawnT -= dt;
+  if (spawnT <= 0) { spawnBarrel(); spawnT = spawnI; }
+
+  for (let i = barrels.length - 1; i >= 0; i--) {
+    const b = barrels[i];
+
+    if (b.onGround) {
+      // Roll on platform
+      b.vy = 0;
+      const p = PLATS[b.platIdx];
+      b.y = p.y - b.h; // snap
+      b.x += b.vx * dt;
+
+      // Fall off edge
+      const offR = b.vx > 0 && b.x + b.w > p.x + p.w + 5;
+      const offL = b.vx < 0 && b.x < p.x - 5;
+      if (offR || offL) { b.onGround = false; b.vy = 15; b.vx = 0; } // vx=0: senkrechter Fall → trifft nächste Plattform sicher
+    } else {
+      // In air
+      b.vy += 900 * dt;
+      b.x  += b.vx * dt;
+      b.y  += b.vy * dt;
+
+      // Land on platform
+      if (b.vy >= 0) {
+        for (let pi = 0; pi < PLATS.length; pi++) {
+          const p = PLATS[pi];
+          const prevB = b.y + b.h - b.vy * dt;
+          if (prevB <= p.y + 3 && b.y + b.h >= p.y &&
+              b.x + b.w > p.x + 4 && b.x < p.x + p.w - 4) {
+            b.y = p.y - b.h; b.vy = 0;
+            b.onGround = true; b.platIdx = pi;
+            b.vx = PLATS[pi].dir * barrelSpeed();
+            break;
+          }
+        }
+      }
+    }
+
+    // Remove if out of bounds
+    if (b.y > GH + 80 || b.x < -80 || b.x > GW + 80) {
+      barrels.splice(i, 1); continue;
+    }
+
+    // Collide with player (small hitbox for fairness)
+    if (!P.dead &&
+        b.x + b.w - 3 > P.x + 3 && b.x + 3 < P.x + P.w - 3 &&
+        b.y + b.h - 2 > P.y + 5 && b.y + 2 < P.y + P.h - 2) {
+      P.dead = true; P.deathTimer = 0.9; hitFlash = 0.7;
+      barrels.splice(i, 1); continue;
+    }
+
+    // Fass übersprungen → Punkte
+    // Zuverlässige Erkennung:
+    //   - Fass rollt auf einer Plattform (b.onGround) — kein fallendes Fass
+    //   - Spieler ist in der Luft (egal ob auf- oder absteigend)
+    //   - Gleiche Höhe: Plattform-Y ≈ Spielerfüße (±90px Toleranz deckt gesamten Sprungbogen ab)
+    //   - Horizontal nah (±50px vom jeweiligen Mittelpunkt)
+    if (!b.jumpScored && b.onGround && !P.dead && !P.onGround && !P.climbing) {
+      const bCx  = b.x + b.w / 2;
+      const pCx  = P.x + P.w / 2;
+      const platY = PLATS[b.platIdx].y;
+      if (Math.abs(bCx - pCx) < 50 && Math.abs(platY - (P.y + P.h)) < 90) {
+        b.jumpScored = true;
+        const jp = 100 * level;
+        score += jp;
+        addFloat(pCx, P.y - 12, '+' + jp + ' JUMP!');
+      }
+    }
+
+    // Animate
+    b.frameT += dt;
+    if (b.frameT > 0.07) { b.frame = (b.frame + 1) % 8; b.frameT = 0; }
+  }
+}
+
+// --- RENDER ---
+function render() {
+  // Background
+  cx.fillStyle = C.bg;
+  cx.fillRect(0, 0, GW, GH);
+
+  // Subtle grid
+  cx.strokeStyle = C.grid; cx.lineWidth = 1;
+  for (let x = 0; x < GW; x += 20) { cx.beginPath(); cx.moveTo(x,0); cx.lineTo(x,GH); cx.stroke(); }
+  for (let y = 0; y < GH; y += 20) { cx.beginPath(); cx.moveTo(0,y); cx.lineTo(GW,y); cx.stroke(); }
+
+  // Ladders
+  for (const l of LADDERS) {
+    cx.fillStyle = C.blu;
+    cx.fillRect(l.x, l.yt, 3, l.yb - l.yt);
+    cx.fillRect(l.x + LW - 3, l.yt, 3, l.yb - l.yt);
+    cx.fillStyle = C.blul;
+    for (let ry = l.yt + 7; ry < l.yb; ry += 12)
+      cx.fillRect(l.x + 3, ry, LW - 6, 3);
+  }
+
+  // Platforms
+  for (let pi = 0; pi < PLATS.length; pi++) {
+    const p = PLATS[pi];
+    cx.fillStyle = pi === 4 ? C.wht : C.yel;
+    cx.fillRect(p.x, p.y, p.w, p.h);
+    // Girder detail
+    cx.fillStyle = 'rgba(0,0,0,0.18)';
+    for (let gx = p.x + 22; gx < p.x + p.w - 8; gx += 28)
+      cx.fillRect(gx, p.y, 2, p.h);
+    // Goal label
+    if (pi === 4) {
+      cx.fillStyle = C.yel; cx.font = '7px "Press Start 2P"';
+      cx.textAlign = 'center';
+      cx.fillText('★ ZIEL ★', p.x + p.w / 2, p.y - 5);
+    }
+  }
+
+  // DK-style figure at top (throws barrels)
+  drawKong();
+
+  // Barrels
+  for (const b of barrels) drawBarrel(b);
+
+  // Player
+  drawPlayer();
+
+  // Schwebende Punkteanzeigen
+  cx.textAlign = 'center';
+  cx.font = '8px "Press Start 2P"';
+  for (const f of floaters) {
+    const a = Math.min(1, f.life * 1.5);
+    cx.globalAlpha = a;
+    cx.fillStyle = f.text.includes('JUMP') ? C.blul : C.yel;
+    cx.fillText(f.text, f.x, f.y);
+  }
+  cx.globalAlpha = 1;
+
+  // HUD
+  drawHUD();
+
+  // Hit flash
+  if (hitFlash > 0) {
+    cx.fillStyle = `rgba(255,50,50,${hitFlash * 0.3})`;
+    cx.fillRect(0, 0, GW, GH);
+    hitFlash = Math.max(0, hitFlash - 0.06);
+  }
+
+  // State overlays
+  if (state === 'menu')    drawMenu();
+  if (state === 'over')    drawOver();
+  if (state === 'winanim') drawWin();
+}
+
+function drawKong() {
+  // Simple gorilla silhouette at top left, throws barrel
+  const kx = 20, ky = 24;
+  cx.fillStyle = '#2a1a5e';
+  cx.fillRect(kx, ky, 28, 34);        // body
+  cx.fillRect(kx + 2, ky - 10, 24, 14); // head
+  cx.fillRect(kx - 6, ky + 4, 8, 18);  // left arm
+  cx.fillRect(kx + 26, ky + 4, 8, 18); // right arm (throwing)
+  cx.fillStyle = '#3b1f8c';
+  cx.fillRect(kx + 6, ky - 8, 14, 8); // face
+  // Barrel in hand
+  cx.fillStyle = C.yeld;
+  cx.beginPath();
+  cx.ellipse(kx + 40, ky + 8, 8, 8, 0, 0, Math.PI * 2);
+  cx.fill();
+  cx.fillStyle = C.yel;
+  cx.beginPath();
+  cx.ellipse(kx + 40, ky + 8, 6, 6, Date.now() * 0.003, 0, Math.PI * 2);
+  cx.fill();
+}
+
+function drawBarrel(b) {
+  const bx = b.x | 0, by = b.y | 0, r = b.w / 2;
+  // Outer rim
+  cx.fillStyle = C.yeld;
+  cx.beginPath();
+  cx.ellipse(bx + r, by + r, r, r * 0.88, 0, 0, Math.PI * 2);
+  cx.fill();
+  // Inner face (rotates)
+  cx.fillStyle = C.yel;
+  cx.beginPath();
+  cx.ellipse(bx + r, by + r, r - 3, (r - 3) * 0.82, b.frame * Math.PI / 4, 0, Math.PI * 2);
+  cx.fill();
+  // Centre band
+  cx.strokeStyle = C.yeld; cx.lineWidth = 3;
+  cx.beginPath();
+  cx.moveTo(bx + 3, by + r); cx.lineTo(bx + b.w - 3, by + r);
+  cx.stroke();
+  // Top/bottom bands
+  cx.lineWidth = 2;
+  cx.beginPath(); cx.moveTo(bx + 4, by + 6); cx.lineTo(bx + b.w - 4, by + 6); cx.stroke();
+  cx.beginPath(); cx.moveTo(bx + 4, by + b.h - 6); cx.lineTo(bx + b.w - 4, by + b.h - 6); cx.stroke();
+}
+
+function drawPlayer() {
+  if (P.dead && Math.floor(P.deathTimer * 10) % 2 === 0) return;
+  const col = hitFlash > 0.4 ? C.red : null;
+  const px = P.x | 0, py = P.y | 0;
+  // Hair
+  cx.fillStyle = col || C.purp;
+  cx.fillRect(px + 3, py, P.w - 6, 5);
+  // Head
+  cx.fillStyle = col || C.skin;
+  cx.fillRect(px + 3, py + 4, P.w - 6, 8);
+  // Body / shirt
+  cx.fillStyle = col || C.red;
+  cx.fillRect(px + 1, py + 10, P.w - 2, P.h - 10);
+  // Shirt number "5"
+  cx.fillStyle = C.yel;
+  cx.font = 'bold 9px "Press Start 2P"';
+  cx.textAlign = 'center';
+  cx.fillText('5', px + P.w / 2, py + P.h - 2);
+  // Legs
+  const la = P.climbing || P.vx === 0 ? 0 : Math.sin(P.frame * 1.5) * 3;
+  cx.fillStyle = col || C.dbl;
+  cx.fillRect(px + 2,       py + P.h, 7, 6 + la);
+  cx.fillRect(px + P.w - 9, py + P.h, 7, 6 - la);
+}
+
+function drawHUD() {
+  cx.fillStyle = 'rgba(0,0,0,0.6)';
+  cx.fillRect(0, 0, GW, 36);
+
+  cx.textAlign = 'left';
+  cx.fillStyle = C.yel; cx.font = '6px "Press Start 2P"';
+  cx.fillText('SCORE', 8, 12);
+  cx.fillStyle = C.wht; cx.font = '9px "Press Start 2P"';
+  cx.fillText(String(score).padStart(6, '0'), 8, 28);
+
+  cx.textAlign = 'center';
+  cx.fillStyle = C.yel; cx.font = '6px "Press Start 2P"';
+  cx.fillText('LVL ' + level, GW / 2, 12);
+  // Lives
+  for (let i = 0; i < Math.max(0, lives); i++) {
+    cx.fillStyle = C.blu;
+    cx.fillRect(GW / 2 - lives * 9 + i * 19, 16, 13, 16);
+    cx.fillStyle = C.yel; cx.font = '6px "Press Start 2P"';
+    cx.textAlign = 'center';
+    cx.fillText('5', GW / 2 - lives * 9 + i * 19 + 6, 27);
+  }
+
+  cx.textAlign = 'right';
+  cx.fillStyle = C.yel; cx.font = '6px "Press Start 2P"';
+  cx.fillText('BEST', GW - 8, 12);
+  cx.fillStyle = C.wht; cx.font = '9px "Press Start 2P"';
+  cx.fillText(String(HS).padStart(6, '0'), GW - 8, 28);
+}
+
+function drawMenu() {
+  cx.fillStyle = 'rgba(13,13,46,0.88)';
+  cx.fillRect(0, 0, GW, GH);
+  cx.textAlign = 'center';
+
+  // SHB header
+  cx.fillStyle = C.yel; cx.font = '9px "Press Start 2P"';
+  cx.fillText('SHB KUNDENTAG 2026', GW / 2, 88);
+  cx.fillStyle = 'rgba(255,255,255,0.7)'; cx.font = '6px "Press Start 2P"';
+  cx.fillText('MÜNCHEN  ·  24. SEPTEMBER', GW / 2, 108);
+
+  // Title
+  cx.fillStyle = C.yel; cx.font = '32px "Press Start 2P"';
+  cx.fillText('LEVEL', GW / 2, 195);
+  cx.fillText('UP!', GW / 2, 240);
+
+  cx.fillStyle = 'rgba(255,255,255,0.8)'; cx.font = '7px "Press Start 2P"';
+  cx.fillText('DER WEG ZUM HIGHSCORE', GW / 2, 268);
+
+  // Controls hint
+  cx.fillStyle = 'rgba(74,159,212,0.7)'; cx.font = '5px "Press Start 2P"';
+  cx.fillText('← →  LAUFEN   ↑  LEITER   SPACE  SPRINGEN', GW / 2, 318);
+
+  // Blink
+  if (Date.now() % 900 < 500) {
+    cx.fillStyle = C.yel; cx.font = '9px "Press Start 2P"';
+    cx.fillText('TIPPEN / SPACE', GW / 2, 370);
+    cx.fillText('ZUM STARTEN', GW / 2, 390);
+  }
+
+  if (HS > 0) {
+    cx.fillStyle = C.blu; cx.font = '7px "Press Start 2P"';
+    cx.fillText('HIGHSCORE: ' + HS, GW / 2, 465);
+  }
+
+  // Version tag
+  cx.fillStyle = 'rgba(255,255,255,0.2)'; cx.font = '5px "Press Start 2P"';
+  cx.fillText('DEMO v0.1', GW / 2, 540);
+}
+
+function drawOver() {
+  cx.fillStyle = 'rgba(13,13,46,0.9)';
+  cx.fillRect(0, 0, GW, GH);
+  cx.textAlign = 'center';
+
+  cx.fillStyle = C.red; cx.font = '20px "Press Start 2P"';
+  cx.fillText('GAME OVER', GW / 2, 185);
+
+  cx.fillStyle = C.wht; cx.font = '8px "Press Start 2P"';
+  cx.fillText('SCORE:  ' + score, GW / 2, 248);
+  cx.fillText('LEVEL:  ' + level, GW / 2, 272);
+  cx.fillText('BEST:   ' + HS, GW / 2, 296);
+
+  if (score > 0 && score >= HS) {
+    cx.fillStyle = C.yel; cx.font = '7px "Press Start 2P"';
+    cx.fillText('★ NEUER HIGHSCORE! ★', GW / 2, 326);
+  }
+
+  // Submit teaser
+  cx.strokeStyle = C.blu; cx.lineWidth = 2;
+  cx.strokeRect(55, 348, GW - 110, 52);
+  cx.fillStyle = C.blu; cx.font = '7px "Press Start 2P"';
+  cx.fillText('GLOBAL EINREICHEN', GW / 2, 368);
+  cx.fillStyle = 'rgba(255,255,255,0.4)'; cx.font = '5px "Press Start 2P"';
+  cx.fillText('kommt in Sprint 1', GW / 2, 388);
+
+  if (Date.now() % 900 < 500) {
+    cx.fillStyle = C.wht; cx.font = '7px "Press Start 2P"';
+    cx.fillText('SPACE / TIPPEN', GW / 2, 446);
+    cx.fillText('= NOCHMAL', GW / 2, 462);
+  }
+}
+
+function drawWin() {
+  const age = 1.8 - winAnim;
+  const alpha = Math.min(1, age * 1.6);
+  cx.fillStyle = `rgba(13,13,46,${alpha * 0.85})`;
+  cx.fillRect(0, 0, GW, GH);
+  if (alpha < 0.3) return;
+
+  // Stars
+  cx.fillStyle = C.yel; cx.font = '20px "Press Start 2P"';
+  cx.textAlign = 'center';
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2 + Date.now() * 0.002;
+    const rx = GW / 2 + Math.cos(a) * 80, ry = 180 + Math.sin(a) * 40;
+    cx.font = '12px "Press Start 2P"';
+    cx.fillText('★', rx, ry);
+  }
+
+  cx.fillStyle = C.yel; cx.font = '22px "Press Start 2P"';
+  cx.fillText('LEVEL UP!', GW / 2, 230);
+
+  cx.fillStyle = C.wht; cx.font = '8px "Press Start 2P"';
+  cx.fillText('+' + winBonus + ' PUNKTE', GW / 2, 272);
+  cx.fillText('WEITER ZU LEVEL ' + (level + 1), GW / 2, 300);
+
+  if (Date.now() % 700 < 380) {
+    cx.fillStyle = C.blu; cx.font = '7px "Press Start 2P"';
+    cx.fillText('EINEN MOMENT...', GW / 2, 360);
+  }
+}
+
+// --- Main loop ---
+let lastT = 0;
+function loop(ts) {
+  const dt = Math.min((ts - lastT) / 1000, 0.05);
+  lastT = ts;
+
+  if (state === 'play') {
+    updatePlayer(dt);
+    updateBarrels(dt);
+    // Floater-Physik
+    for (const f of floaters) { f.life -= dt; f.y -= 38 * dt; }
+    floaters = floaters.filter(f => f.life > 0);
+  }
+  if (state === 'winanim') {
+    winAnim -= dt;
+    if (winAnim <= 0) nextLevel();
+  }
+
+  render();
+  requestAnimationFrame(loop);
+}
+
+// --- Start / restart ---
+window.addEventListener('keydown', e => {
+  if (e.code === 'Space' || e.code === 'Enter') {
+    if (state === 'menu')          initGame();
+    else if (state === 'over') { level = 1; lives = 3; initGame(); }
+  }
+});
+cv.addEventListener('pointerdown', () => {
+  if (state === 'menu')          initGame();
+  else if (state === 'over') { level = 1; lives = 3; initGame(); }
+});
+
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

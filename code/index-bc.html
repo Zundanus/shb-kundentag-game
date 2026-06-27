@@ -1,0 +1,911 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>LEVEL UP! — BC Dev Cycle · SHB 2026</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  background:#0d0d2e;
+  display:flex;align-items:center;justify-content:center;
+  height:100dvh;overflow:hidden;
+  touch-action:none;
+  font-family:'Press Start 2P',monospace;
+}
+#wrap{position:relative;display:flex;flex-direction:column;align-items:center}
+canvas{display:block;image-rendering:pixelated}
+#ctrl{
+  display:none;
+  position:absolute;bottom:0;left:0;right:0;
+  height:110px;pointer-events:none;
+}
+.btn{
+  position:absolute;
+  border:3px solid #f5c400;border-radius:6px;
+  background:rgba(245,196,0,.12);color:#f5c400;
+  font-family:'Press Start 2P',monospace;
+  display:flex;align-items:center;justify-content:center;
+  pointer-events:all;user-select:none;
+  -webkit-tap-highlight-color:transparent;cursor:pointer;
+}
+.btn:active{background:rgba(245,196,0,.38)}
+#bL{bottom:10px;left:8px;width:58px;height:58px;font-size:22px}
+#bU{bottom:76px;left:42px;width:58px;height:30px;font-size:14px}
+#bR{bottom:10px;left:76px;width:58px;height:58px;font-size:22px}
+#bJ{bottom:10px;right:8px;width:88px;height:58px;font-size:8px;line-height:1.6}
+</style>
+</head>
+<body>
+<div id="wrap">
+<canvas id="c"></canvas>
+<div id="ctrl">
+  <div class="btn" id="bL">◀</div>
+  <div class="btn" id="bU">▲</div>
+  <div class="btn" id="bR">▶</div>
+  <div class="btn" id="bJ">JUMP<br>↑</div>
+</div>
+</div>
+<script>
+/* ============================================================
+   LEVEL UP! — BC Dev Cycle · SHB Kundentag 2026
+   Proto v0.2-bc · Studio Zundanus / Ravi Kohli · 2026-06-27
+   Entscheidungen: E-016–E-032 · Gate GO Richard 2026-06-27
+   ============================================================ */
+
+const cv = document.getElementById('c');
+const cx = cv.getContext('2d');
+cx.imageSmoothingEnabled = false; // kein Anti-Alias auf Images
+const ctrl = document.getElementById('ctrl');
+
+// --- Sprites laden ---
+const SPRITES = {};
+const SPRITE_FILES = [
+  ['gorilla0', '../sprites/gorilla-arm-rechts.png'],
+  ['gorilla1', '../sprites/gorilla-arm-links.png'],
+  ['player-idle',   '../sprites/player-idle.png'],
+  ['player-walk-1', '../sprites/player-walk-1.png'],
+  ['player-walk-2', '../sprites/player-walk-2.png'],
+  ['player-walk-3', '../sprites/player-walk-3.png'],
+  ['player-walk-4', '../sprites/player-walk-4.png'],
+  ['barrel-bug',         '../sprites/barrel-bug.png'],
+  ['barrel-config',      '../sprites/barrel-config.png'],
+  ['barrel-anforderung', '../sprites/barrel-anforderung.png'],
+  ['barrel-entwicklung', '../sprites/barrel-entwicklung.png'],
+  ['barrel-schulung',    '../sprites/barrel-schulung.png'],
+  ['barrel-stehend',    '../sprites/barrel-stehend-ui.png'],
+];
+let spritesLoaded = 0;
+SPRITE_FILES.forEach(([key, src]) => {
+  const img = new Image();
+  img.onload  = () => { SPRITES[key] = img; spritesLoaded++; };
+  img.onerror = () => { spritesLoaded++; }; // graceful fallback
+  img.src = src;
+});
+
+// --- Game world ---
+const GW = 400, GH = 560;
+
+function resize() {
+  const ctrlH = ('ontouchstart' in window) ? 110 : 0;
+  const s = Math.min(window.innerWidth / GW, window.innerHeight / (GH + ctrlH));
+  cv.width = GW; cv.height = GH;
+  cv.style.width  = (GW * s) + 'px';
+  cv.style.height = (GH * s) + 'px';
+  const wrap = document.getElementById('wrap');
+  wrap.style.width  = (GW * s) + 'px';
+  wrap.style.height = ((GH + ctrlH) * s) + 'px';
+  ctrl.style.width  = (GW * s) + 'px';
+  ctrl.style.height = (ctrlH * s) + 'px';
+  ctrl.style.transform = `scale(${s})`;
+  ctrl.style.transformOrigin = 'bottom left';
+  if ('ontouchstart' in window) ctrl.style.display = 'block';
+}
+window.addEventListener('resize', resize);
+resize();
+
+// --- Palette ---
+const C = {
+  bg:'#1a1a4e', bgd:'#0d0d2e', yel:'#f5c400', yeld:'#c97d00',
+  blu:'#4a9fd4', blul:'#6bbde0', wht:'#ffffff', red:'#ff4444',
+  purp:'#7c3aed', skin:'#f4a261', dbl:'#1e40af',
+  grid:'rgba(74,159,212,0.06)',
+};
+
+// --- Barrel-Typen (E-018, E-019) ---
+const BARREL_TYPES = {
+  bug:         { pts:5,  color:'#cc2200', label:'BUG', weight:50 },
+  config:      { pts:10, color:'#7a8a9a', label:'CFG', weight:22 },
+  anforderung: { pts:20, color:'#4a9fd4', label:'ANF', weight:15 },
+  entwicklung: { pts:30, color:'#7c3aed', label:'DEV', weight:8  },
+  schulung:    { pts:50, color:'#f5c400', label:'SCH', weight:5  },
+};
+// Gewichteter Pool
+const BARREL_POOL = [];
+for (const [k, t] of Object.entries(BARREL_TYPES))
+  for (let i = 0; i < t.weight; i++) BARREL_POOL.push(k);
+
+// Akt-Typen: welche Barrel-Typen pro Akt aktiv (E-024)
+const ACT_TYPES = [
+  ['bug','config'],                                          // Akt 0: Sprint
+  ['bug','config','anforderung','entwicklung'],              // Akt 1: Release
+  ['bug','config','anforderung','entwicklung','schulung'],   // Akt 2: Go-Live
+];
+const ACT_NAMES = ['SPRINT','RELEASE','GO-LIVE'];
+// Neue Barrel-Typen pro Akt (was dazu kommt)
+const ACT_NEW = [
+  ['bug','config'],           // Akt 0: diese starten
+  ['anforderung','entwicklung'], // Akt 1: diese kommen dazu
+  ['schulung'],               // Akt 2: das kommt dazu
+];
+const ACT_DESC = [
+  'Bug & Config Fässer kommen!',
+  '+Anforderung & Entwicklung!',
+  '+Schulung — alles auf einmal!',
+];
+
+function randomBarrelType(act) {
+  const allowed = ACT_TYPES[act];
+  const pool = BARREL_POOL.filter(t => allowed.includes(t));
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+// --- Layout ---
+const PLATS = [
+  {x:0,   y:490, w:400, h:10, dir:-1},  // P0 Boden  (+20px hoch)
+  {x:10,  y:400, w:372, h:10, dir: 1},  // P1
+  {x:18,  y:310, w:372, h:10, dir:-1},  // P2
+  {x:10,  y:220, w:372, h:10, dir: 1},  // P3
+  {x:18,  y:130, w:372, h:10, dir:-1},  // P4 Ziel
+];
+const LW = 18;
+const LADDERS = [
+  {x:346, yt:400, yb:490},
+  {x: 36, yt:310, yb:400},
+  {x:346, yt:220, yb:310},
+  {x: 36, yt:130, yb:220},
+];
+const BSPAWN = {x:358, y:104}; // über P4 (y=130-28+2=104)
+
+// --- Input ---
+const K = {};
+window.addEventListener('keydown', e => { K[e.code]=true; });
+window.addEventListener('keyup',   e => { K[e.code]=false; });
+function mkBtn(id,code){
+  const el=document.getElementById(id);
+  const on=e=>{e.preventDefault();K[code]=true;};
+  const off=e=>{e.preventDefault();K[code]=false;};
+  el.addEventListener('pointerdown',on);
+  el.addEventListener('pointerup',off);
+  el.addEventListener('pointercancel',off);
+  el.addEventListener('pointerleave',off);
+}
+mkBtn('bL','ArrowLeft'); mkBtn('bR','ArrowRight');
+mkBtn('bU','ArrowUp');   mkBtn('bJ','Space');
+const L=()=>K.ArrowLeft||K.KeyA;
+const R=()=>K.ArrowRight||K.KeyD;
+const UP=()=>K.ArrowUp||K.KeyW;
+const DN=()=>K.ArrowDown||K.KeyS;
+const JP=()=>K.Space;
+
+// --- Player ---
+const P={
+  x:30,y:470,w:22,h:30,
+  vx:0,vy:0,onGround:false,climbing:false,
+  dead:false,deathTimer:0,jumpLock:false,
+  frame:0,frameT:0,highestPlat:0,
+};
+
+// --- Game state ---
+let barrels=[], state='menu';
+let score=0, scoreAcc=0, level=1, lives=3;
+let act=0, cycle=0;       // E-023: Akt-System
+let spawnT=1.5, spawnI=2.8; // Erstes Fass nach 1.5s
+let spawnFreeze=1.5;        // Spawn-Freeze Countdown
+let hitFlash=0, winAnim=0, winBonus=0;
+let floaters=[];
+let buildTutTimer=0; // >0 = Gebäude-Tutorial-Popup aktiv
+let buildTutShown=false; // nur einmal zeigen
+
+// Highscore + Loop-Count (E-028)
+let HS, HS_LOOPS;
+try { HS=+localStorage.getItem('shb_bc_hs')||0; } catch(e){HS=0;}
+try { HS_LOOPS=+localStorage.getItem('shb_bc_loops')||0; } catch(e){HS_LOOPS=0;}
+
+// Gebäude-Loops (E-026)
+let buildLoops=0; // wie viele Loops im aktuellen Run abgeschlossen
+
+// Gorilla-Animation (E-029)
+let kongPushT=0;   // Timer für Push-Animation
+let kongWobble=0;  // Akkumulator für Wobble
+
+// --- Hilfsfunktionen ---
+function addFloat(x,y,text){floaters.push({x,y,text,life:1.2});}
+
+function actSpeed() {
+  // E-024: Basis-Speed pro Akt, +15% pro Zyklus
+  const base=[80,115,155][act];
+  return base * Math.pow(1.15, cycle);
+}
+function actSpawnI() {
+  const base=[2.8,2.0,1.4][act];
+  return Math.max(0.8, base / Math.pow(1.1, cycle));
+}
+
+function ladderAt(e){
+  for(let i=0;i<LADDERS.length;i++){
+    const l=LADDERS[i];
+    if(e.x+e.w>l.x+2&&e.x<l.x+LW-2&&e.y+e.h>l.yt&&e.y<l.yb) return i;
+  }
+  return -1;
+}
+
+// --- Init ---
+function initGame(){
+  resetPlayer(); barrels=[];
+  act=0; cycle=0; buildLoops=0;
+  score=0; scoreAcc=0; hitFlash=0; winAnim=0; floaters=[];
+  spawnFreeze=1.5; spawnT=1.5; spawnI=actSpawnI();
+  state='play';
+}
+function resetPlayer(){
+  P.x=30;P.y=450;P.vx=0;P.vy=0; // P0=490, Player h=30 → start y=460
+  P.onGround=false;P.climbing=false;
+  P.dead=false;P.deathTimer=0;P.jumpLock=false;P.highestPlat=0;
+}
+function nextAct(){
+  // E-023: 3 Akte zyklisch
+  act=(act+1)%3;
+  if(act===0){ cycle++; buildLoops++;
+    if(!buildTutShown){buildTutTimer=4.5;buildTutShown=true;} // Tutorial einmal nach Loop 1
+  }
+  level++;
+  resetPlayer(); barrels=[];
+  spawnFreeze=2.5; spawnT=2.5; spawnI=actSpawnI(); // kurze Pause zwischen Akten
+  hitFlash=0; winAnim=0; state='play';
+}
+
+// Stehend-Fass-Position (links vor Gorilla, auf P4)
+const BARREL_STAGE = {x:272, y:PLATS[4].y-36}; // 36px = stehendes Fass etwas größer
+
+// --- Barrel spawnen — kurze Pause am Stapelplatz ---
+function spawnBarrel(){
+  const type=randomBarrelType(act);
+  barrels.push({
+    x:BARREL_STAGE.x, y:BARREL_STAGE.y,
+    w:40, h:28,
+    vx:0, vy:0,
+    onGround:true, platIdx:4,
+    frame:0, frameT:0,
+    type, jumpScored:false,
+    holdT:0.45, // Sekunden stehen bleiben bevor Rollen
+  });
+  kongPushT=0.5;
+}
+
+// --- Player Update ---
+function updatePlayer(dt){
+  if(P.dead){
+    P.deathTimer-=dt;
+    if(P.deathTimer<=0){
+      lives--;
+      if(lives<=0){
+        state='over';
+        if(score>HS){ HS=score; try{localStorage.setItem('shb_bc_hs',HS);}catch(e){} }
+        if(buildLoops>HS_LOOPS){ HS_LOOPS=buildLoops; try{localStorage.setItem('shb_bc_loops',HS_LOOPS);}catch(e){} }
+      } else {
+        resetPlayer(); barrels=[]; spawnFreeze=2; spawnT=2; hitFlash=0;
+      }
+    }
+    return;
+  }
+  const li=ladderAt(P);
+  // Leiter nur vom Boden aus greifen — verhindert mid-air Leiter-Snap
+  if(li>=0&&UP()&&!P.climbing&&P.onGround){P.climbing=true;P.vy=0;}
+  if(!P.climbing&&DN()&&P.onGround){
+    for(let i=0;i<LADDERS.length;i++){
+      const l=LADDERS[i];
+      if(P.x+P.w>l.x+2&&P.x<l.x+LW-2&&Math.abs(P.y+P.h-l.yt)<12){
+        P.climbing=true;P.onGround=false;P.vy=0;
+        P.y+=6; // Füße in Leiterkollisions-Zone schieben (war exakt auf l.yt)
+        P.x=l.x+LW/2-P.w/2; // auf Leitermitte zentrieren
+        break;
+      }
+    }
+  }
+  if(li<0) P.climbing=false;
+  if(P.climbing){
+    const l=LADDERS[li>=0?li:0];
+    if(li>=0) P.x+=(l.x+LW/2-P.w/2-P.x)*0.25;
+    P.vx=0; P.vy=UP()?-88:DN()?85:0;
+  } else {
+    P.vx=L()?-158:R()?158:0;
+    P.vy+=900*dt;
+    if(JP()&&P.onGround&&!P.jumpLock){P.vy=-285;P.onGround=false;P.jumpLock=true;} // 285²/1800=45px — passt für 90px Abstand
+    if(!JP()) P.jumpLock=false;
+  }
+  const prevY=P.y;
+  P.x+=P.vx*dt; P.y+=P.vy*dt;
+  P.x=Math.max(0,Math.min(GW-P.w,P.x));
+  P.onGround=false;
+  if(!P.climbing&&P.vy>=0){
+    for(let pi=0;pi<PLATS.length;pi++){
+      const p=PLATS[pi];
+      if(prevY+P.h<=p.y+3&&P.y+P.h>=p.y&&P.x+P.w>p.x+6&&P.x<p.x+p.w-6){
+        P.y=p.y-P.h;P.vy=0;P.onGround=true;
+        if(pi>0&&pi>P.highestPlat){
+          P.highestPlat=pi;
+          if(pi<4){const b=pi*200;score+=b;addFloat(P.x+P.w/2,P.y-8,'+'+b);}
+        }
+        if(pi===4){
+          winBonus=1000+level*200;
+          score+=winBonus;
+          addFloat(GW/2,GH/2+40,'+'+winBonus+'!!');
+          winAnim=1.8; state='winanim';
+        }
+        break;
+      }
+    }
+  }
+  if(P.y>GH+60){P.x=30;P.y=470;P.vy=0;}
+  P.frameT+=dt;
+  if(P.frameT>0.13){P.frame=(P.frame+1)%4;P.frameT=0;}
+  scoreAcc+=dt*10*level;
+  const pts=scoreAcc|0;
+  if(pts>0){score+=pts;scoreAcc-=pts;}
+}
+
+// --- Barrel Update ---
+function updateBarrels(dt){
+  // Spawn-Freeze (E-025)
+  if(spawnFreeze>0){ spawnFreeze-=dt; return; }
+
+  // Cap: max 4 Fässer (E-024)
+  spawnT-=dt;
+  if(spawnT<=0&&barrels.length<4){ spawnBarrel(); spawnT=spawnI; }
+
+  for(let i=barrels.length-1;i>=0;i--){
+    const b=barrels[i];
+    // Halte-Phase: Fass steht kurz am Stapelplatz
+    if(b.holdT>0){
+      b.holdT-=dt;
+      if(b.holdT<=0){ b.vx=-actSpeed(); } // jetzt losrollen
+      continue; // noch nicht physikupdaten
+    }
+    if(b.onGround){
+      b.vy=0;
+      const p=PLATS[b.platIdx];
+      b.y=p.y-b.h;
+      b.x+=b.vx*dt;
+      const offR=b.vx>0&&b.x+b.w>p.x+p.w+5;
+      const offL=b.vx<0&&b.x<p.x-5;
+      if(offR||offL){b.onGround=false;b.vy=15;b.vx=0;}
+    } else {
+      b.vy+=900*dt; b.x+=b.vx*dt; b.y+=b.vy*dt;
+      if(b.vy>=0){
+        for(let pi=0;pi<PLATS.length;pi++){
+          const p=PLATS[pi];
+          const prevB=b.y+b.h-b.vy*dt;
+          if(prevB<=p.y+3&&b.y+b.h>=p.y&&b.x+b.w>p.x+4&&b.x<p.x+p.w-4){
+            b.y=p.y-b.h;b.vy=0;b.onGround=true;b.platIdx=pi;
+            b.vx=PLATS[pi].dir*actSpeed();
+            break;
+          }
+        }
+      }
+    }
+    if(b.y>GH+80||b.x<-80||b.x>GW+80){barrels.splice(i,1);continue;}
+
+    // Kollision
+    if(!P.dead&&b.x+b.w-3>P.x+3&&b.x+3<P.x+P.w-3&&b.y+b.h-2>P.y+5&&b.y+2<P.y+P.h-2){
+      P.dead=true;P.deathTimer=0.9;hitFlash=0.7;
+      barrels.splice(i,1);continue;
+    }
+
+    // Typisierter Jump-Bonus (E-019)
+    if(!b.jumpScored&&!P.dead&&!P.onGround&&!P.climbing&&P.vy>0){
+      const bCx=b.x+b.w/2, pCx=P.x+P.w/2;
+      if(Math.abs(bCx-pCx)<40&&b.y>=P.y+P.h-8){
+        b.jumpScored=true;
+        const jp=BARREL_TYPES[b.type].pts*level;
+        score+=jp;
+        addFloat(P.x+P.w/2,P.y-12,'+'+jp+' '+BARREL_TYPES[b.type].label+'!');
+      }
+    }
+    b.frameT+=dt;
+    if(b.frameT>0.08){b.frame=(b.frame+1)%8;b.frameT=0;}
+  }
+}
+
+// --- RENDER ---
+function render(){
+  cx.imageSmoothingEnabled=false;
+  cx.fillStyle=C.bg; cx.fillRect(0,0,GW,GH);
+  // Grid
+  cx.strokeStyle=C.grid;cx.lineWidth=1;
+  for(let x=0;x<GW;x+=20){cx.beginPath();cx.moveTo(x,0);cx.lineTo(x,GH);cx.stroke();}
+  for(let y=0;y<GH;y+=20){cx.beginPath();cx.moveTo(0,y);cx.lineTo(GW,y);cx.stroke();}
+
+  // Leitern
+  for(const l of LADDERS){
+    cx.fillStyle=C.blu;
+    cx.fillRect(l.x,l.yt,3,l.yb-l.yt);
+    cx.fillRect(l.x+LW-3,l.yt,3,l.yb-l.yt);
+    cx.fillStyle=C.blul;
+    for(let ry=l.yt+7;ry<l.yb;ry+=12) cx.fillRect(l.x+3,ry,LW-6,3);
+  }
+
+  // Plattformen
+  for(let pi=0;pi<PLATS.length;pi++){
+    const p=PLATS[pi];
+    cx.fillStyle=pi===4?C.wht:C.yel;
+    cx.fillRect(p.x,p.y,p.w,p.h);
+    cx.fillStyle='rgba(0,0,0,0.18)';
+    for(let gx=p.x+16;gx<p.x+p.w-6;gx+=18) cx.fillRect(gx,p.y,1,p.h);
+    if(pi===4){
+      cx.fillStyle=C.yel;cx.font='7px "Press Start 2P"';cx.textAlign='center';
+      cx.fillText('BC FEATURE LIVE',p.x+p.w/2,p.y-5);
+    }
+  }
+
+  // Fässer
+  for(const b of barrels) drawBarrel(b);
+
+  // Spieler
+  drawPlayer();
+
+  // Floaters
+  cx.textAlign='center';cx.font='8px "Press Start 2P"';
+  for(const f of floaters){
+    const a=Math.min(1,f.life*1.5);
+    cx.globalAlpha=a;
+    cx.fillStyle=f.text.includes('SCH')?C.yel:f.text.includes('!')?C.blul:C.yel;
+    cx.fillText(f.text,f.x,f.y);
+  }
+  cx.globalAlpha=1;
+
+  // HUD zuerst → Gorilla danach (damit Gorilla nicht vom HUD-Balken verdeckt wird)
+  drawHUD();
+  drawBuilding();
+  drawKong();
+
+  if(hitFlash>0){
+    cx.fillStyle=`rgba(255,50,50,${hitFlash*0.3})`;
+    cx.fillRect(0,0,GW,GH);
+    hitFlash=Math.max(0,hitFlash-0.06);
+  }
+
+  // Gebäude-Tutorial-Popup (nach erstem Loop)
+  if(buildTutTimer>0){
+    const fade=Math.min(1,Math.min(buildTutTimer,4.5-buildTutTimer+0.3)/0.4);
+    cx.globalAlpha=Math.max(0,fade);
+    const px=30,py=GH/2-95,pw=GW-60,ph=172;
+    cx.fillStyle='rgba(10,10,40,0.96)'; cx.fillRect(px,py,pw,ph);
+    cx.strokeStyle=C.yel;cx.lineWidth=2; cx.strokeRect(px,py,pw,ph);
+
+    cx.textAlign='center';
+    cx.fillStyle=C.yel;cx.font='9px "Press Start 2P"';
+    cx.fillText('DEIN HIGHSCORE BAUT EIN HAUS!',GW/2,py+20);
+    cx.fillStyle='rgba(255,255,255,0.7)';cx.font='8px "Press Start 2P"';
+    cx.fillText('Pro Loop wächst es eine Stufe',GW/2,py+38);
+
+    // 5 Stufen nebeneinander visualisieren
+    const stages=[1,2,3,4,5];
+    const sw=40,sh=44,sgap=8;
+    const stot=stages.length*(sw+sgap)-sgap;
+    let sx=GW/2-stot/2;
+    stages.forEach(s=>{
+      drawBuildingShape(sx,py+48,s,sw,sh,false);
+      // Stufen-Label
+      cx.fillStyle=s===buildLoops?C.yel:'rgba(255,255,255,0.4)';
+      cx.font='8px "Press Start 2P"';cx.textAlign='center';
+      cx.fillText(s,sx+sw/2,py+100);
+      if(s===buildLoops){
+        cx.fillStyle=C.yel;cx.font='8px "Press Start 2P"';
+        cx.fillText('DU',sx+sw/2,py+114);
+      }
+      sx+=sw+sgap;
+    });
+
+    cx.fillStyle='rgba(255,255,255,0.4)';cx.font='8px "Press Start 2P"';cx.textAlign='center';
+    cx.fillText('Mehr Loops = höheres Gebäude',GW/2,py+130);
+    cx.fillStyle=C.blu;cx.font='8px "Press Start 2P"';
+    cx.fillText('Dein Rekord bleibt als Ghost sichtbar!',GW/2,py+148);
+
+    // Fortschrittsbalken
+    const prog=buildTutTimer/4.5;
+    cx.fillStyle='rgba(255,255,255,0.15)';cx.fillRect(px+16,py+ph-12,pw-32,6);
+    cx.fillStyle=C.yel;cx.fillRect(px+16,py+ph-12,Math.round((pw-32)*prog),6);
+    cx.globalAlpha=1;
+  }
+
+  // Akt-Intro Banner während Spawn-Freeze
+  if(state==='play' && spawnFreeze>0){
+    const fadeIn=Math.min(1,(2.5-spawnFreeze)/0.3);
+    const fadeOut=spawnFreeze<0.5?spawnFreeze/0.5:1;
+    const a=Math.min(fadeIn,fadeOut);
+    cx.globalAlpha=a;
+    cx.fillStyle='rgba(13,13,46,0.85)';cx.fillRect(20,GH/2-54,GW-40,100);
+    cx.strokeStyle=C.blu;cx.lineWidth=2;cx.strokeRect(20,GH/2-54,GW-40,100);
+    cx.textAlign='center';
+    cx.fillStyle=C.yel;cx.font='10px "Press Start 2P"';
+    cx.fillText('AKT: '+ACT_NAMES[act],GW/2,GH/2-28);
+    cx.fillStyle=C.wht;cx.font='8px "Press Start 2P"';
+    cx.fillText(ACT_DESC[act],GW/2,GH/2-6);
+    // Barrel-Icons
+    const types=ACT_TYPES[act];
+    const bw=28,bg=8,tot=types.length*(bw+bg)-bg;
+    let bxi=GW/2-tot/2;
+    types.forEach(k=>{
+      const spr=SPRITES['barrel-'+k];
+      if(spr) cx.drawImage(spr,bxi,GH/2+8,bw,20);
+      else{ cx.fillStyle=BARREL_TYPES[k].color;cx.fillRect(bxi,GH/2+8,bw,20); }
+      bxi+=bw+bg;
+    });
+    cx.globalAlpha=1;
+  }
+
+  if(state==='menu')    drawMenu();
+  if(state==='over')    drawOver();
+  if(state==='winanim') drawWin();
+}
+
+// --- Gorilla (E-029: Zappel + Push) ---
+function drawKong(){
+  const kx=310, ky=74; // P4 bei y=130, Gorilla 60px hoch → ky=130-60+4=74
+  // --- Stehendes Fass links vor Gorilla ---
+  // Wird gezeichnet BEVOR der Gorilla (damit er dahinter wirkt)
+  const sfx = BARREL_STAGE.x - 4; // leicht nach links, optisch zentriert
+  const sfy = PLATS[4].y - 40;     // auf der Plattform stehend, 40px hoch
+  if(SPRITES['barrel-stehend']){
+    cx.drawImage(SPRITES['barrel-stehend'], sfx, sfy, 36, 40);
+  } else {
+    // Fallback: einfaches Rechteck-Fass
+    cx.fillStyle='#3a6fbf'; cx.fillRect(sfx+4,sfy,28,38);
+    cx.fillStyle='#f5c400'; cx.fillRect(sfx+2,sfy+10,32,4); cx.fillRect(sfx+2,sfy+24,32,4);
+  }
+  kongWobble+=0.003;
+  const wobbleX = kongPushT>0 ? 4 : Math.sin(kongWobble*80)*1.5;
+  const wobbleY = kongPushT>0 ? 2 : 0;
+  const frameIdx = Math.floor(Date.now()/400)%2;
+  const sprKey = 'gorilla'+frameIdx;
+
+  if(SPRITES[sprKey]){
+    cx.save();
+    cx.translate(kx+wobbleX, ky+wobbleY);
+    cx.drawImage(SPRITES[sprKey],0,0,56,60);
+    cx.restore();
+  } else {
+    // Fallback Canvas-Gorilla
+    const ox=kx+wobbleX, oy=ky+wobbleY;
+    cx.fillStyle='#2a1a5e';
+    cx.fillRect(ox,oy,28,34);
+    cx.fillRect(ox+2,oy-10,24,14);
+    cx.fillRect(ox-6,oy+4,8,18);
+    cx.fillRect(ox+26,oy+4,8,18);
+    cx.fillStyle='#3b1f8c';
+    cx.fillRect(ox+6,oy-8,14,8);
+    cx.fillStyle=C.yeld;
+    cx.beginPath();cx.ellipse(ox+40,oy+8,8,8,0,0,Math.PI*2);cx.fill();
+    cx.fillStyle=C.yel;
+    cx.beginPath();cx.ellipse(ox+40,oy+8,6,6,Date.now()*0.003,0,Math.PI*2);cx.fill();
+  }
+  if(kongPushT>0) kongPushT=Math.max(0,kongPushT-0.016);
+}
+
+// --- Barrel zeichnen ---
+function drawBarrel(b){
+  const bx=b.x|0, by=b.y|0;
+  const sprKey='barrel-'+b.type;
+
+  if(SPRITES[sprKey]){
+    // Leichtes Wippen + 6px nach unten (remove.bg hat Padding oben im Sprite)
+    const tilt=Math.sin(Date.now()*0.008+b.x*0.05)*0.06;
+    const yOff=6; // Korrektur: Sprite-Padding oben
+    cx.save();
+    cx.translate(bx+b.w/2, by+b.h/2+yOff);
+    cx.rotate(tilt);
+    cx.drawImage(SPRITES[sprKey],-b.w/2,-b.h/2,b.w,b.h);
+    cx.restore();
+  } else {
+    // Fallback
+    const t=BARREL_TYPES[b.type];
+    const r=b.w/2;
+    cx.fillStyle=t.color;
+    cx.beginPath();cx.ellipse(bx+r,by+r*0.88,r,r*0.78,0,0,Math.PI*2);cx.fill();
+    cx.fillStyle='rgba(255,255,255,0.3)';
+    cx.beginPath();cx.ellipse(bx+r,by+r*0.88,r-3,(r-3)*0.7,b.frame*Math.PI/4,0,Math.PI*2);cx.fill();
+    cx.strokeStyle='rgba(0,0,0,0.4)';cx.lineWidth=2;
+    cx.beginPath();cx.moveTo(bx+3,by+r);cx.lineTo(bx+b.w-3,by+r);cx.stroke();
+    // Label
+    cx.fillStyle=C.wht;cx.font='5px "Press Start 2P"';cx.textAlign='center';
+    cx.fillText(t.label,bx+r,by+r*0.88+2);
+  }
+}
+
+// --- Spieler ---
+function drawPlayer(){
+  if(P.dead&&Math.floor(P.deathTimer*10)%2===0) return;
+  const px=P.x|0, py=P.y|0;
+
+  // Sprite auswählen: Walk-Animation wenn läuft, sonst Idle
+  const isWalking = P.onGround && Math.abs(P.vx) > 10;
+  const walkFrame = (Math.floor(Date.now()/120)%4)+1; // 4 Frames @ ~120ms
+  const sprKey = isWalking ? 'player-walk-'+walkFrame : 'player-idle';
+  const spr = SPRITES[sprKey] || SPRITES['player-idle'];
+
+  if(spr){
+    cx.save();
+    // Spiegeln wenn links
+    if(P.vx<0){ cx.translate(px+P.w,0); cx.scale(-1,1); }
+    else       { cx.translate(px,0); }
+    cx.drawImage(spr, 0, py, P.w, P.h+4);
+    cx.restore();
+    if(hitFlash>0.4){
+      cx.save();
+      cx.globalAlpha=0.5;cx.fillStyle=C.red;
+      cx.fillRect(px,py,P.w,P.h+4);
+      cx.restore();
+    }
+  } else {
+    // Fallback Canvas
+    const col=hitFlash>0.4?C.red:null;
+    cx.fillStyle=col||C.purp; cx.fillRect(px+3,py,P.w-6,5);
+    cx.fillStyle=col||C.skin; cx.fillRect(px+3,py+4,P.w-6,8);
+    cx.fillStyle=col||C.red;  cx.fillRect(px+1,py+10,P.w-2,P.h-10);
+    cx.fillStyle=C.yel;cx.font='bold 9px "Press Start 2P"';cx.textAlign='center';
+    cx.fillText('5',px+P.w/2,py+P.h-2);
+    const la=P.climbing||P.vx===0?0:Math.sin(P.frame*1.5)*3;
+    cx.fillStyle=col||C.dbl;
+    cx.fillRect(px+2,py+P.h,7,6+la);
+    cx.fillRect(px+P.w-9,py+P.h,7,6-la);
+  }
+}
+
+// --- Gebäude-Progression (E-026, E-027) — kompakt, im HUD-Bereich ---
+function drawBuilding(){
+  // Klein + im HUD (y=0..36): kein Gameplay überdeckt
+  const bx=GW-36, by=1;
+  const W=32, H=28; // Gebäude-Box
+  const stage=Math.min(buildLoops,5);
+
+  // Ghost (HS_LOOPS)
+  if(HS_LOOPS>0){
+    cx.globalAlpha=0.25;
+    drawBuildingShape(bx, by, Math.min(HS_LOOPS,5), W, H, true);
+    cx.globalAlpha=1;
+  }
+  if(stage>0) drawBuildingShape(bx, by, stage, W, H, false);
+
+  // Loop-Label rechts im HUD
+  if(cycle>0){
+    cx.fillStyle=C.yel;cx.font='4px "Press Start 2P"';cx.textAlign='center';
+    cx.fillText('×'+cycle,bx+W/2,by+H+7);
+  }
+}
+
+function drawBuildingShape(bx,by,stage,W,H,ghost){
+  const col  = ghost?'rgba(74,159,212,0.5)' :C.yel;
+  const wall = ghost?'rgba(74,159,212,0.4)' :'#4a9fd4';
+  const base = ghost?'rgba(200,150,0,0.3)'  :C.yeld;
+  // Fundament
+  cx.fillStyle=base; cx.fillRect(bx+2,by+H-6,W-4,6);
+  if(stage>=2){ cx.fillStyle=wall; cx.fillRect(bx+4,by+H-16,W-8,10); }
+  if(stage>=3){ cx.fillStyle=wall; cx.fillRect(bx+4,by+H-24,W-8,8);
+                cx.fillStyle=col;  cx.fillRect(bx+2,by+H-25,W-4,3); }
+  if(stage>=4){ cx.fillStyle='rgba(160,220,255,0.8)';
+                cx.fillRect(bx+5, by+H-22,5,5);
+                cx.fillRect(bx+W-10,by+H-22,5,5); }
+  if(stage>=5){ cx.fillStyle=col;  cx.fillRect(bx+W/2-1,by+2,2,H-25);
+                cx.fillStyle=C.red;cx.fillRect(bx+W/2+1,by+2,6,4); }
+}
+
+// --- HUD --- (min. 8px Font für Press Start 2P Schärfe)
+function drawHUD(){
+  cx.fillStyle='rgba(0,0,0,0.75)'; cx.fillRect(0,0,GW,38);
+  // Score links
+  cx.textAlign='left';
+  cx.fillStyle=C.yel;cx.font='8px "Press Start 2P"'; cx.fillText('SCORE',6,13);
+  cx.fillStyle=C.wht;cx.font='9px "Press Start 2P"'; cx.fillText(String(score).padStart(6,'0'),6,27);
+
+  // Akt-Anzeige Mitte
+  cx.textAlign='center';
+  cx.fillStyle=C.yel;cx.font='8px "Press Start 2P"';
+  cx.fillText(ACT_NAMES[act],GW/2,13);
+  cx.fillStyle='rgba(255,255,255,0.6)';cx.font='8px "Press Start 2P"';
+  cx.fillText('LVL '+level,GW/2,25);
+
+  // Lives — Pixel-Rechtecke (kein Text, passt in 38px HUD)
+  const lx=GW/2-lives*11;
+  for(let i=0;i<Math.max(0,lives);i++){
+    cx.fillStyle=C.blu; cx.fillRect(lx+i*22,29,18,8);
+    cx.fillStyle=C.yel;cx.font='8px "Press Start 2P"';cx.textAlign='center';
+    cx.fillText('5',lx+i*22+9,37);
+  }
+
+  // Best rechts — lassen Platz für Gebäude-Icon
+  cx.textAlign='right';
+  cx.fillStyle=C.yel;cx.font='8px "Press Start 2P"'; cx.fillText('BEST',GW-42,13);
+  cx.fillStyle=C.wht;cx.font='9px "Press Start 2P"'; cx.fillText(String(HS).padStart(6,'0'),GW-42,27);
+}
+
+// --- Menü ---
+function drawMenu(){
+  cx.fillStyle='rgba(13,13,46,0.9)'; cx.fillRect(0,0,GW,GH);
+  cx.textAlign='center';
+  cx.fillStyle=C.yel;cx.font='8px "Press Start 2P"';
+  cx.fillText('SHB KUNDENTAG 2026',GW/2,80);
+  cx.fillStyle='rgba(255,255,255,0.6)';cx.font='8px "Press Start 2P"';
+  cx.fillText('BC DEV CYCLE EDITION',GW/2,96);
+
+  cx.fillStyle=C.yel;cx.font='32px "Press Start 2P"';
+  cx.fillText('LEVEL',GW/2,185);
+  cx.fillText('UP!',GW/2,230);
+
+  // Barrel-Legende
+  cx.fillStyle='rgba(0,0,0,0.4)';cx.fillRect(30,248,340,70);
+  const types=Object.entries(BARREL_TYPES);
+  types.forEach(([k,t],i)=>{
+    const x=50+i*64, y=258;
+    if(SPRITES['barrel-'+k]){
+      cx.drawImage(SPRITES['barrel-'+k],x-12,y,30,22);
+    } else {
+      cx.fillStyle=t.color;cx.fillRect(x-12,y+4,22,14);
+    }
+    cx.fillStyle=t.color;cx.font='5px "Press Start 2P"';cx.textAlign='center';
+    cx.fillText(t.label,x,y+34);
+    cx.fillStyle='rgba(255,255,255,0.6)';cx.font='4px "Press Start 2P"';
+    cx.fillText(t.pts+'pt',x,y+44);
+  });
+
+  cx.fillStyle='rgba(74,159,212,0.7)';cx.font='5px "Press Start 2P"';cx.textAlign='center';
+  cx.fillText('← →  LAUFEN   ↑  LEITER   SPACE  SPRINGEN',GW/2,340);
+
+  if(Date.now()%900<500){
+    cx.fillStyle=C.yel;cx.font='9px "Press Start 2P"';
+    cx.fillText('TIPPEN / SPACE',GW/2,380);
+    cx.fillText('ZUM STARTEN',GW/2,398);
+  }
+  if(HS>0){
+    cx.fillStyle=C.blu;cx.font='6px "Press Start 2P"';
+    cx.fillText('HIGHSCORE: '+HS,GW/2,460);
+    if(HS_LOOPS>0) cx.fillText('BEST LOOP: '+HS_LOOPS,GW/2,474);
+  }
+  cx.fillStyle='rgba(255,255,255,0.2)';cx.font='5px "Press Start 2P"';
+  cx.fillText('PROTO v0.2-bc',GW/2,540);
+}
+
+// --- Game Over ---
+function drawOver(){
+  cx.fillStyle='rgba(13,13,46,0.92)';cx.fillRect(0,0,GW,GH);
+  cx.textAlign='center';
+  cx.fillStyle=C.red;cx.font='20px "Press Start 2P"';cx.fillText('GAME OVER',GW/2,160);
+  cx.fillStyle=C.wht;cx.font='8px "Press Start 2P"';
+  cx.fillText('SCORE:  '+score,GW/2,220);
+  cx.fillText('LOOPS:  '+buildLoops,GW/2,244);
+  cx.fillText('BEST:   '+HS,GW/2,268);
+  if(score>=HS&&score>0){
+    cx.fillStyle=C.yel;cx.font='7px "Press Start 2P"';
+    cx.fillText('★ NEUER HIGHSCORE! ★',GW/2,295);
+  }
+  // Gebäude-Vergleich (neue Signatur: bx,by,stage,W,H,ghost)
+  if(buildLoops>0||HS_LOOPS>0){
+    cx.fillStyle='rgba(0,0,0,0.4)';cx.fillRect(80,305,240,70);
+    drawBuildingShape(110,310,Math.min(buildLoops,5),48,52,false);
+    if(HS_LOOPS>0){
+      cx.globalAlpha=0.35;
+      drawBuildingShape(220,310,Math.min(HS_LOOPS,5),48,52,true);
+      cx.globalAlpha=1;
+    }
+    cx.fillStyle=C.yel;cx.font='8px "Press Start 2P"';cx.textAlign='center';
+    cx.fillText('DEIN RUN',134,378);
+    if(HS_LOOPS>0){cx.fillStyle=C.blul;cx.fillText('BEST',244,378);}
+  }
+  cx.strokeStyle=C.blu;cx.lineWidth=2;
+  cx.strokeRect(40,392,GW-80,44);
+  cx.fillStyle=C.blu;cx.font='8px "Press Start 2P"';cx.textAlign='center';
+  cx.fillText('GLOBAL EINREICHEN',GW/2,412);
+  cx.fillStyle='rgba(255,255,255,0.35)';cx.font='8px "Press Start 2P"';
+  cx.fillText('kommt in Sprint 2',GW/2,428);
+  if(Date.now()%900<500){
+    cx.fillStyle=C.wht;cx.font='7px "Press Start 2P"';
+    cx.fillText('SPACE = NOCHMAL',GW/2,470);
+  }
+}
+
+// --- Win-Animation ---
+function drawWin(){
+  const age=1.8-winAnim;
+  const alpha=Math.min(1,age*1.6);
+  cx.fillStyle=`rgba(13,13,46,${alpha*0.85})`;cx.fillRect(0,0,GW,GH);
+  if(alpha<0.3) return;
+  // --- Abgeschlossener Akt ---
+  cx.textAlign='center';
+  cx.fillStyle=C.yel;cx.font='9px "Press Start 2P"';
+  cx.fillText(ACT_NAMES[act]+' GESCHAFFT! ★',GW/2,110);
+  cx.fillStyle=C.wht;cx.font='8px "Press Start 2P"';
+  cx.fillText('+'+winBonus+' PUNKTE',GW/2,132);
+
+  // Trennlinie
+  cx.strokeStyle='rgba(74,159,212,0.5)';cx.lineWidth=1;
+  cx.beginPath();cx.moveTo(40,148);cx.lineTo(GW-40,148);cx.stroke();
+
+  // --- Nächster Akt ---
+  const nextAct=(act+1)%3;
+  cx.fillStyle=C.blu;cx.font='8px "Press Start 2P"';
+  cx.fillText('NÄCHSTER AKT:',GW/2,170);
+  cx.fillStyle=C.yel;cx.font='14px "Press Start 2P"';
+  cx.fillText(ACT_NAMES[nextAct],GW/2,194);
+
+  // Neue Barrel-Vorschau
+  const newTypes = ACT_NEW[nextAct];
+  const bw=36, bh=26, gap=10;
+  const totalW = newTypes.length*(bw+gap)-gap;
+  let bx = GW/2 - totalW/2;
+  cx.fillStyle='rgba(255,255,255,0.5)';cx.font='8px "Press Start 2P"';
+  if(nextAct===0){
+    cx.fillText('Fässer:', GW/2, 214);
+  } else {
+    cx.fillText('Neu dabei:', GW/2, 214);
+  }
+  newTypes.forEach(k=>{
+    const t=BARREL_TYPES[k];
+    const spr=SPRITES['barrel-'+k];
+    if(spr){ cx.drawImage(spr,bx,224,bw,bh); }
+    else { cx.fillStyle=t.color;cx.fillRect(bx,224,bw,bh); }
+    cx.fillStyle=t.color;cx.font='8px "Press Start 2P"';cx.textAlign='center';
+    cx.fillText(t.label,bx+bw/2,258);
+    cx.fillStyle='rgba(255,255,255,0.5)';cx.font='8px "Press Start 2P"';
+    cx.fillText(t.pts+'pt',bx+bw/2,270);
+    bx+=bw+gap;
+  });
+  cx.textAlign='center';
+
+  // Speed-Hinweis bei Loop
+  if(cycle>0){
+    cx.fillStyle=C.red;cx.font='8px "Press Start 2P"';
+    cx.fillText('LOOP '+cycle+' — SPEED +15%!',GW/2,292);
+  }
+
+  // Countdown-Balken
+  const prog = winAnim/1.8;
+  cx.fillStyle='rgba(255,255,255,0.15)';cx.fillRect(60,310,GW-120,8);
+  cx.fillStyle=C.yel;cx.fillRect(60,310,Math.round((GW-120)*(1-prog)),8);
+}
+
+// --- Loop ---
+let lastT=0;
+function loop(ts){
+  const dt=Math.min((ts-lastT)/1000,0.05); lastT=ts;
+  if(state==='play'){
+    updatePlayer(dt);
+    updateBarrels(dt);
+    for(const f of floaters){f.life-=dt;f.y-=38*dt;}
+    floaters=floaters.filter(f=>f.life>0);
+    if(buildTutTimer>0) buildTutTimer-=dt;
+  }
+  if(state==='winanim'){
+    winAnim-=dt;
+    if(winAnim<=0) nextAct();
+  }
+  render();
+  requestAnimationFrame(loop);
+}
+
+// --- Start ---
+window.addEventListener('keydown',e=>{
+  if(e.code==='Space'||e.code==='Enter'){
+    if(state==='menu') initGame();
+    else if(state==='over'){level=1;lives=3;initGame();}
+  }
+});
+cv.addEventListener('pointerdown',()=>{
+  if(state==='menu') initGame();
+  else if(state==='over'){level=1;lives=3;initGame();}
+});
+
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
