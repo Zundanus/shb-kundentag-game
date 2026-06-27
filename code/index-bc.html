@@ -50,8 +50,9 @@ canvas{display:block;image-rendering:pixelated}
 <script>
 /* ============================================================
    LEVEL UP! — BC Dev Cycle · SHB Kundentag 2026
-   Proto v0.2-bc · Studio Zundanus / Ravi Kohli · 2026-06-27
-   Entscheidungen: E-016–E-032 · Gate GO Richard 2026-06-27
+   Proto v0.4-bc · Studio Zundanus / Ravi Kohli · 2026-06-28
+   Entscheidungen: E-016–E-046 · Finale Sprites, Test-Fixes, Leiter-Bug, App-Reward + App-Label
+   Gate GO Richard 2026-06-27 · Asset-Integration CONDITIONAL GO 2026-06-28
    ============================================================ */
 
 const cv = document.getElementById('c');
@@ -61,20 +62,37 @@ const ctrl = document.getElementById('ctrl');
 
 // --- Sprites laden ---
 const SPRITES = {};
+// === FINALE ASSETS (sprites/final/) — Integration 2026-06-28, Ravi (E-042) ===
 const SPRITE_FILES = [
-  ['gorilla0', '../sprites/gorilla-arm-rechts.png'],
-  ['gorilla1', '../sprites/gorilla-arm-links.png'],
-  ['player-idle',   '../sprites/player-idle.png'],
-  ['player-walk-1', '../sprites/player-walk-1.png'],
-  ['player-walk-2', '../sprites/player-walk-2.png'],
-  ['player-walk-3', '../sprites/player-walk-3.png'],
-  ['player-walk-4', '../sprites/player-walk-4.png'],
-  ['barrel-bug',         '../sprites/barrel-bug.png'],
-  ['barrel-config',      '../sprites/barrel-config.png'],
-  ['barrel-anforderung', '../sprites/barrel-anforderung.png'],
-  ['barrel-entwicklung', '../sprites/barrel-entwicklung.png'],
-  ['barrel-schulung',    '../sprites/barrel-schulung.png'],
-  ['barrel-stehend',    '../sprites/barrel-stehend-ui.png'],
+  // Gorilla: 2-Frame-Wurf (rechts = Arm hoch = Wurf-Pose), 65x72
+  ['gorilla0', '../sprites/final/gorilla-rechts.png'],
+  ['gorilla1', '../sprites/final/gorilla-links.png'],
+  // Player: Idle + 4 Walk-Frames (feste Leinwand 215x266, Navy-Kontur)
+  ['player-idle',   '../sprites/final/player/player-idle.png'],
+  ['player-walk-1', '../sprites/final/player/player-walk-1.png'],
+  ['player-walk-2', '../sprites/final/player/player-walk-2.png'],
+  ['player-walk-3', '../sprites/final/player/player-walk-3.png'],
+  ['player-walk-4', '../sprites/final/player/player-walk-4.png'],
+  // Fässer: 8-Frame-Roll-Sheets je Thema (312x30 = 8 x 39x30), Badge eingebrannt
+  ['barrel-bug-sheet',         '../sprites/final/barrels/barrel-bug-sheet.png'],
+  ['barrel-config-sheet',      '../sprites/final/barrels/barrel-config-sheet.png'],
+  ['barrel-anforderung-sheet', '../sprites/final/barrels/barrel-anforderung-sheet.png'],
+  ['barrel-entwicklung-sheet', '../sprites/final/barrels/barrel-entwicklung-sheet.png'],
+  ['barrel-schulung-sheet',    '../sprites/final/barrels/barrel-schulung-sheet.png'],
+  // Basis-Fass grau (E-042) — nur Fallback/UI, spawnt NICHT im Gameplay
+  ['barrel-roll-sheet',        '../sprites/final/barrel-roll-sheet.png'],
+  // Stehendes Fass am Stapelplatz (UI, bleibt blau), 41x56
+  ['barrel-stehend',  '../sprites/final/barrel-stand.png'],
+  // Environment-Tiles
+  ['tile-platform', '../sprites/final/platform-beam.png'], // 32x16, horizontal kacheln
+  ['tile-ladder',   '../sprites/final/ladder.png'],        // 18x16, vertikal kacheln
+  ['tile-floor',    '../sprites/final/floor-block.png'],   // 48x48, Boden
+  // App-Reward (E-046): 5 Bau-Stufen (Projekt -> Live), ersetzt das "Haus"
+  ['app-1', '../sprites/final/app-stages/app-stage-1.png'],
+  ['app-2', '../sprites/final/app-stages/app-stage-2.png'],
+  ['app-3', '../sprites/final/app-stages/app-stage-3.png'],
+  ['app-4', '../sprites/final/app-stages/app-stage-4.png'],
+  ['app-5', '../sprites/final/app-stages/app-stage-5.png'],
 ];
 let spritesLoaded = 0;
 SPRITE_FILES.forEach(([key, src]) => {
@@ -87,20 +105,30 @@ SPRITE_FILES.forEach(([key, src]) => {
 // --- Game world ---
 const GW = 400, GH = 560;
 
+// Touch-Erkennung robust: iPadOS-Safari & manche Touch-Laptops melden kein 'ontouchstart'
+const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+
 function resize() {
-  const ctrlH = ('ontouchstart' in window) ? 110 : 0;
+  const ctrlH = isTouch ? 110 : 0;
   const s = Math.min(window.innerWidth / GW, window.innerHeight / (GH + ctrlH));
-  cv.width = GW; cv.height = GH;
+  // F-1: Backing-Store in echten Geräte-Pixeln rendern (scharfer Text/Sprites), dpr auf 2 gedeckelt (Mobil-Perf)
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const r = s * dpr;
+  cv.width  = Math.round(GW * r);
+  cv.height = Math.round(GH * r);
+  cx.setTransform(r, 0, 0, r, 0, 0); // Spiel-Koordinaten bleiben 400x560
+  cx.imageSmoothingEnabled = false;
   cv.style.width  = (GW * s) + 'px';
   cv.style.height = (GH * s) + 'px';
   const wrap = document.getElementById('wrap');
   wrap.style.width  = (GW * s) + 'px';
   wrap.style.height = ((GH + ctrlH) * s) + 'px';
-  ctrl.style.width  = (GW * s) + 'px';
-  ctrl.style.height = (ctrlH * s) + 'px';
+  // Control-Leiste in Design-Pixeln halten, danach EINMAL skalieren (vorher: width=GW*s + scale(s) = doppelt skaliert)
+  ctrl.style.width  = GW + 'px';
+  ctrl.style.height = ctrlH + 'px';
   ctrl.style.transform = `scale(${s})`;
   ctrl.style.transformOrigin = 'bottom left';
-  if ('ontouchstart' in window) ctrl.style.display = 'block';
+  if (isTouch) ctrl.style.display = 'block';
 }
 window.addEventListener('resize', resize);
 resize();
@@ -133,6 +161,8 @@ const ACT_TYPES = [
   ['bug','config','anforderung','entwicklung','schulung'],   // Akt 2: Go-Live
 ];
 const ACT_NAMES = ['SPRINT','RELEASE','GO-LIVE'];
+const ACT_GOAL  = ['PROTOTYP','BETA','LIVE!']; // Ziel-Label oben, App-Lebenszyklus statt Code-Sprech (E-046)
+const MAX_STAGE = 5; // App-Reward: Anzahl Bau-Stufen (app-stage-1..5)
 // Neue Barrel-Typen pro Akt (was dazu kommt)
 const ACT_NEW = [
   ['bug','config'],           // Akt 0: diese starten
@@ -252,7 +282,7 @@ function initGame(){
 function resetPlayer(){
   P.x=30;P.y=450;P.vx=0;P.vy=0; // P0=490, Player h=30 → start y=460
   P.onGround=false;P.climbing=false;
-  P.dead=false;P.deathTimer=0;P.jumpLock=false;P.highestPlat=0;
+  P.dead=false;P.deathTimer=0;P.jumpLock=true;P.highestPlat=0; // jumpLock=true: kein Auto-Sprung wenn Space beim Start/Respawn gehalten wird
 }
 function nextAct(){
   // E-023: 3 Akte zyklisch
@@ -267,14 +297,14 @@ function nextAct(){
 }
 
 // Stehend-Fass-Position (links vor Gorilla, auf P4)
-const BARREL_STAGE = {x:272, y:PLATS[4].y-36}; // 36px = stehendes Fass etwas größer
+const BARREL_STAGE = {x:272, y:PLATS[4].y-23}; // sitzt auf P4 (Fass-Höhe 23, F-2)
 
 // --- Barrel spawnen — kurze Pause am Stapelplatz ---
 function spawnBarrel(){
   const type=randomBarrelType(act);
   barrels.push({
-    x:BARREL_STAGE.x, y:BARREL_STAGE.y,
-    w:40, h:28,
+    x:BARREL_STAGE.x-28, y:BARREL_STAGE.y, // F-3: vor dem Stehfass erscheinen (links davor), dann rollen
+    w:30, h:23, // F-2: Maßstab an Figur angepasst (Verhältnis 1,3 bleibt)
     vx:0, vy:0,
     onGround:true, platIdx:4,
     frame:0, frameT:0,
@@ -329,10 +359,18 @@ function updatePlayer(dt){
   P.x+=P.vx*dt; P.y+=P.vy*dt;
   P.x=Math.max(0,Math.min(GW-P.w,P.x));
   P.onGround=false;
+  // Bug-Fix „endloser Sturz": am Leiter-Fuß sauber auf die Plattform absetzen (statt durchzufallen)
+  if(P.climbing && P.vy>0){
+    const cl=LADDERS[li>=0?li:0];
+    if(cl && P.y+P.h>=cl.yb){ P.y=cl.yb-P.h; P.climbing=false; P.onGround=true; P.vy=0; }
+  }
   if(!P.climbing&&P.vy>=0){
     for(let pi=0;pi<PLATS.length;pi++){
       const p=PLATS[pi];
-      if(prevY+P.h<=p.y+3&&P.y+P.h>=p.y&&P.x+P.w>p.x+6&&P.x<p.x+p.w-6){
+      // P0 = solider Boden: fängt immer (kein Durchfallen ins Leere); obere Plattformen nur von oben
+      const onX = P.x+P.w>p.x+6 && P.x<p.x+p.w-6;
+      const catchY = P.y+P.h>=p.y && (pi===0 ? true : prevY+P.h<=p.y+3);
+      if(onX&&catchY){
         P.y=p.y-P.h;P.vy=0;P.onGround=true;
         if(pi>0&&pi>P.highestPlat){
           P.highestPlat=pi;
@@ -351,9 +389,12 @@ function updatePlayer(dt){
   if(P.y>GH+60){P.x=30;P.y=470;P.vy=0;}
   P.frameT+=dt;
   if(P.frameT>0.13){P.frame=(P.frame+1)%4;P.frameT=0;}
-  scoreAcc+=dt*10*level;
-  const pts=scoreAcc|0;
-  if(pts>0){score+=pts;scoreAcc-=pts;}
+  // Passiver Zeit-Score nur außerhalb der Spawn-Freeze (sonst Gratis-Punkte bei unverwundbarem Stillstand im Akt-Intro/Respawn)
+  if(spawnFreeze<=0){
+    scoreAcc+=dt*10*level;
+    const pts=scoreAcc|0;
+    if(pts>0){score+=pts;scoreAcc-=pts;}
+  }
 }
 
 // --- Barrel Update ---
@@ -427,25 +468,45 @@ function render(){
   for(let x=0;x<GW;x+=20){cx.beginPath();cx.moveTo(x,0);cx.lineTo(x,GH);cx.stroke();}
   for(let y=0;y<GH;y+=20){cx.beginPath();cx.moveTo(0,y);cx.lineTo(GW,y);cx.stroke();}
 
-  // Leitern
+  // Leitern — tile-ladder (6x16) vertikal gekachelt, auf LW=18 gestreckt
   for(const l of LADDERS){
-    cx.fillStyle=C.blu;
-    cx.fillRect(l.x,l.yt,3,l.yb-l.yt);
-    cx.fillRect(l.x+LW-3,l.yt,3,l.yb-l.yt);
-    cx.fillStyle=C.blul;
-    for(let ry=l.yt+7;ry<l.yb;ry+=12) cx.fillRect(l.x+3,ry,LW-6,3);
+    if(SPRITES['tile-ladder']){
+      for(let ry=l.yt; ry<l.yb; ry+=16){
+        const h=Math.min(16, l.yb-ry);
+        cx.drawImage(SPRITES['tile-ladder'], 0,0,18,h, l.x, ry, LW, h); // Quelle beschneiden statt stauchen
+      }
+    } else {
+      cx.fillStyle=C.blu;
+      cx.fillRect(l.x,l.yt,3,l.yb-l.yt);
+      cx.fillRect(l.x+LW-3,l.yt,3,l.yb-l.yt);
+      cx.fillStyle=C.blul;
+      for(let ry=l.yt+7;ry<l.yb;ry+=12) cx.fillRect(l.x+3,ry,LW-6,3);
+    }
   }
 
-  // Plattformen
+  // Plattformen + Boden
   for(let pi=0;pi<PLATS.length;pi++){
     const p=PLATS[pi];
-    cx.fillStyle=pi===4?C.wht:C.yel;
-    cx.fillRect(p.x,p.y,p.w,p.h);
-    cx.fillStyle='rgba(0,0,0,0.18)';
-    for(let gx=p.x+16;gx<p.x+p.w-6;gx+=18) cx.fillRect(gx,p.y,1,p.h);
+    if(pi===0 && SPRITES['tile-floor']){
+      // Boden (P0): floor-block (48x48) flächig unter der untersten Ebene
+      for(let fy=p.y; fy<GH; fy+=48)
+        for(let fx=0; fx<GW; fx+=48)
+          cx.drawImage(SPRITES['tile-floor'], fx, fy, 48, 48);
+    } else if(SPRITES['tile-platform']){
+      // Gerüst-Balken (32x16) horizontal gekachelt, Oberkante ~p.y
+      for(let gx=p.x; gx<p.x+p.w; gx+=32){
+        const gw=Math.min(32, p.x+p.w-gx);
+        cx.drawImage(SPRITES['tile-platform'], 0, 0, gw, 16, gx, p.y-3, gw, 16);
+      }
+    } else {
+      cx.fillStyle=pi===4?C.wht:C.yel;
+      cx.fillRect(p.x,p.y,p.w,p.h);
+      cx.fillStyle='rgba(0,0,0,0.18)';
+      for(let gx=p.x+16;gx<p.x+p.w-6;gx+=18) cx.fillRect(gx,p.y,1,p.h);
+    }
     if(pi===4){
-      cx.fillStyle=C.yel;cx.font='7px "Press Start 2P"';cx.textAlign='center';
-      cx.fillText('BC FEATURE LIVE',p.x+p.w/2,p.y-5);
+      cx.fillStyle=C.yel;cx.font='8px "Press Start 2P"';cx.textAlign='center';
+      cx.fillText(ACT_GOAL[act],p.x+p.w/2,p.y-7);
     }
   }
 
@@ -486,9 +547,9 @@ function render(){
 
     cx.textAlign='center';
     cx.fillStyle=C.yel;cx.font='9px "Press Start 2P"';
-    cx.fillText('DEIN HIGHSCORE BAUT EIN HAUS!',GW/2,py+20);
+    cx.fillText('JEDER LOOP BAUT DEINE APP!',GW/2,py+20);
     cx.fillStyle='rgba(255,255,255,0.7)';cx.font='8px "Press Start 2P"';
-    cx.fillText('Pro Loop wächst es eine Stufe',GW/2,py+38);
+    cx.fillText('Pro Loop wächst sie eine Stufe',GW/2,py+38);
 
     // 5 Stufen nebeneinander visualisieren
     const stages=[1,2,3,4,5];
@@ -509,7 +570,7 @@ function render(){
     });
 
     cx.fillStyle='rgba(255,255,255,0.4)';cx.font='8px "Press Start 2P"';cx.textAlign='center';
-    cx.fillText('Mehr Loops = höheres Gebäude',GW/2,py+130);
+    cx.fillText('Mehr Loops = fertigere App',GW/2,py+130);
     cx.fillStyle=C.blu;cx.font='8px "Press Start 2P"';
     cx.fillText('Dein Rekord bleibt als Ghost sichtbar!',GW/2,py+148);
 
@@ -538,9 +599,7 @@ function render(){
     const bw=28,bg=8,tot=types.length*(bw+bg)-bg;
     let bxi=GW/2-tot/2;
     types.forEach(k=>{
-      const spr=SPRITES['barrel-'+k];
-      if(spr) cx.drawImage(spr,bxi,GH/2+8,bw,20);
-      else{ cx.fillStyle=BARREL_TYPES[k].color;cx.fillRect(bxi,GH/2+8,bw,20); }
+      if(!drawBarrelStatic(k,bxi,GH/2+8,bw,20)){ cx.fillStyle=BARREL_TYPES[k].color;cx.fillRect(bxi,GH/2+8,bw,20); }
       bxi+=bw+bg;
     });
     cx.globalAlpha=1;
@@ -553,13 +612,14 @@ function render(){
 
 // --- Gorilla (E-029: Zappel + Push) ---
 function drawKong(){
-  const kx=310, ky=74; // P4 bei y=130, Gorilla 60px hoch → ky=130-60+4=74
-  // --- Stehendes Fass links vor Gorilla ---
-  // Wird gezeichnet BEVOR der Gorilla (damit er dahinter wirkt)
-  const sfx = BARREL_STAGE.x - 4; // leicht nach links, optisch zentriert
-  const sfy = PLATS[4].y - 40;     // auf der Plattform stehend, 40px hoch
+  const KW=58, KH=64;                 // 65x72-Verhältnis, auf Spielgröße skaliert
+  const kx=308, ky=PLATS[4].y-KH+4;   // Füße knapp auf P4 (y=130)
+  // --- Stehendes Fass links vor Gorilla (barrel-stand 41x56) ---
+  const SBW=30, SBH=41;
+  const sfx = BARREL_STAGE.x - 4;
+  const sfy = PLATS[4].y - SBH;        // steht auf P4
   if(SPRITES['barrel-stehend']){
-    cx.drawImage(SPRITES['barrel-stehend'], sfx, sfy, 36, 40);
+    cx.drawImage(SPRITES['barrel-stehend'], sfx, sfy, SBW, SBH);
   } else {
     // Fallback: einfaches Rechteck-Fass
     cx.fillStyle='#3a6fbf'; cx.fillRect(sfx+4,sfy,28,38);
@@ -568,13 +628,14 @@ function drawKong(){
   kongWobble+=0.003;
   const wobbleX = kongPushT>0 ? 4 : Math.sin(kongWobble*80)*1.5;
   const wobbleY = kongPushT>0 ? 2 : 0;
-  const frameIdx = Math.floor(Date.now()/400)%2;
+  // Beim Schieben (kongPushT>0) Wurf-Pose = gorilla0 (Arm hoch/rechts), sonst sanfter 2-Frame-Idle
+  const frameIdx = kongPushT>0 ? 0 : (Math.floor(Date.now()/400)%2);
   const sprKey = 'gorilla'+frameIdx;
 
   if(SPRITES[sprKey]){
     cx.save();
     cx.translate(kx+wobbleX, ky+wobbleY);
-    cx.drawImage(SPRITES[sprKey],0,0,56,60);
+    cx.drawImage(SPRITES[sprKey],0,0,KW,KH);
     cx.restore();
   } else {
     // Fallback Canvas-Gorilla
@@ -594,34 +655,35 @@ function drawKong(){
   if(kongPushT>0) kongPushT=Math.max(0,kongPushT-0.016);
 }
 
-// --- Barrel zeichnen ---
+// --- Sprite-Sheet-Helper (Integration 2026-06-28): zeichnet Frame f aus horizontalem Sheet ---
+function drawSheet(key, frame, frames, dx, dy, dw, dh){
+  const img=SPRITES[key];
+  if(!img) return false;
+  const fw=img.width/frames, fh=img.height;
+  cx.drawImage(img, (((frame%frames)+frames)%frames)*fw, 0, fw, fh, dx, dy, dw, dh);
+  return true;
+}
+// Statisches Fass (Frame 0) für UI/Vorschauen
+function drawBarrelStatic(type, dx, dy, dw, dh){
+  return drawSheet('barrel-'+type+'-sheet', 0, 8, dx, dy, dw, dh);
+}
+
+// --- Barrel zeichnen — 8-Frame-Roll-Sheet (39x30), Badge eingebrannt ---
 function drawBarrel(b){
   const bx=b.x|0, by=b.y|0;
-  const sprKey='barrel-'+b.type;
-
-  if(SPRITES[sprKey]){
-    // Leichtes Wippen + 6px nach unten (remove.bg hat Padding oben im Sprite)
-    const tilt=Math.sin(Date.now()*0.008+b.x*0.05)*0.06;
-    const yOff=6; // Korrektur: Sprite-Padding oben
-    cx.save();
-    cx.translate(bx+b.w/2, by+b.h/2+yOff);
-    cx.rotate(tilt);
-    cx.drawImage(SPRITES[sprKey],-b.w/2,-b.h/2,b.w,b.h);
-    cx.restore();
-  } else {
-    // Fallback
-    const t=BARREL_TYPES[b.type];
-    const r=b.w/2;
-    cx.fillStyle=t.color;
-    cx.beginPath();cx.ellipse(bx+r,by+r*0.88,r,r*0.78,0,0,Math.PI*2);cx.fill();
-    cx.fillStyle='rgba(255,255,255,0.3)';
-    cx.beginPath();cx.ellipse(bx+r,by+r*0.88,r-3,(r-3)*0.7,b.frame*Math.PI/4,0,Math.PI*2);cx.fill();
-    cx.strokeStyle='rgba(0,0,0,0.4)';cx.lineWidth=2;
-    cx.beginPath();cx.moveTo(bx+3,by+r);cx.lineTo(bx+b.w-3,by+r);cx.stroke();
-    // Label
-    cx.fillStyle=C.wht;cx.font='5px "Press Start 2P"';cx.textAlign='center';
-    cx.fillText(t.label,bx+r,by+r*0.88+2);
-  }
+  // b.frame läuft bereits 0..7 (updateBarrels) → Sheet IST die Rollanimation, keine Rotation nötig.
+  if(drawSheet('barrel-'+b.type+'-sheet', b.frame, 8, bx, by, b.w, b.h)) return;
+  // Fallback (prozedural) — bleibt als Sicherheitsnetz
+  const t=BARREL_TYPES[b.type];
+  const r=b.w/2;
+  cx.fillStyle=t.color;
+  cx.beginPath();cx.ellipse(bx+r,by+r*0.88,r,r*0.78,0,0,Math.PI*2);cx.fill();
+  cx.fillStyle='rgba(255,255,255,0.3)';
+  cx.beginPath();cx.ellipse(bx+r,by+r*0.88,r-3,(r-3)*0.7,b.frame*Math.PI/4,0,Math.PI*2);cx.fill();
+  cx.strokeStyle='rgba(0,0,0,0.4)';cx.lineWidth=2;
+  cx.beginPath();cx.moveTo(bx+3,by+r);cx.lineTo(bx+b.w-3,by+r);cx.stroke();
+  cx.fillStyle=C.wht;cx.font='5px "Press Start 2P"';cx.textAlign='center';
+  cx.fillText(t.label,bx+r,by+r*0.88+2);
 }
 
 // --- Spieler ---
@@ -686,6 +748,11 @@ function drawBuilding(){
 }
 
 function drawBuildingShape(bx,by,stage,W,H,ghost){
+  // E-046: App-Reward — zeichnet die App-Stufe (Sprite). Ghost-Alpha setzt der Aufrufer.
+  const s=Math.max(1,Math.min(stage|0,MAX_STAGE));
+  const app=SPRITES['app-'+s];
+  if(app){ cx.drawImage(app, bx, by, W, H); return; }
+  // Fallback: prozedurales "Haus" (alt), falls Sprites nicht laden
   const col  = ghost?'rgba(74,159,212,0.5)' :C.yel;
   const wall = ghost?'rgba(74,159,212,0.4)' :'#4a9fd4';
   const base = ghost?'rgba(200,150,0,0.3)'  :C.yeld;
@@ -748,9 +815,7 @@ function drawMenu(){
   const types=Object.entries(BARREL_TYPES);
   types.forEach(([k,t],i)=>{
     const x=50+i*64, y=258;
-    if(SPRITES['barrel-'+k]){
-      cx.drawImage(SPRITES['barrel-'+k],x-12,y,30,22);
-    } else {
+    if(!drawBarrelStatic(k,x-12,y,30,22)){
       cx.fillStyle=t.color;cx.fillRect(x-12,y+4,22,14);
     }
     cx.fillStyle=t.color;cx.font='5px "Press Start 2P"';cx.textAlign='center';
@@ -773,7 +838,7 @@ function drawMenu(){
     if(HS_LOOPS>0) cx.fillText('BEST LOOP: '+HS_LOOPS,GW/2,474);
   }
   cx.fillStyle='rgba(255,255,255,0.2)';cx.font='5px "Press Start 2P"';
-  cx.fillText('PROTO v0.2-bc',GW/2,540);
+  cx.fillText('PROTO v0.4-bc',GW/2,540);
 }
 
 // --- Game Over ---
@@ -851,9 +916,7 @@ function drawWin(){
   }
   newTypes.forEach(k=>{
     const t=BARREL_TYPES[k];
-    const spr=SPRITES['barrel-'+k];
-    if(spr){ cx.drawImage(spr,bx,224,bw,bh); }
-    else { cx.fillStyle=t.color;cx.fillRect(bx,224,bw,bh); }
+    if(!drawBarrelStatic(k,bx,224,bw,bh)){ cx.fillStyle=t.color;cx.fillRect(bx,224,bw,bh); }
     cx.fillStyle=t.color;cx.font='8px "Press Start 2P"';cx.textAlign='center';
     cx.fillText(t.label,bx+bw/2,258);
     cx.fillStyle='rgba(255,255,255,0.5)';cx.font='8px "Press Start 2P"';
@@ -872,6 +935,15 @@ function drawWin(){
   const prog = winAnim/1.8;
   cx.fillStyle='rgba(255,255,255,0.15)';cx.fillRect(60,310,GW-120,8);
   cx.fillStyle=C.yel;cx.fillRect(60,310,Math.round((GW-120)*(1-prog)),8);
+
+  // App-Reward (E-046, pro Loop): die App, die entsteht — groß im Win-Screen
+  const appStage = Math.min(Math.max(buildLoops,1),MAX_STAGE);
+  if(SPRITES['app-'+appStage]){
+    const aw=104, ah=91, ax=GW/2-aw/2, ay=330;
+    cx.drawImage(SPRITES['app-'+appStage], ax, ay, aw, ah);
+    cx.fillStyle=C.blu;cx.font='8px "Press Start 2P"';cx.textAlign='center';
+    cx.fillText('DEINE APP  '+appStage+'/'+MAX_STAGE, GW/2, ay+ah+14);
+  }
 }
 
 // --- Loop ---
