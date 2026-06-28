@@ -54,7 +54,7 @@ canvas{display:block;image-rendering:pixelated;touch-action:none}
 <script>
 /* ============================================================
    LEVEL UP! — BC Dev Cycle · SHB Kundentag 2026
-   Proto v0.4.2-bc · Studio Zundanus / Ravi Kohli · 2026-06-28
+   Proto v0.4.3-bc · Studio Zundanus / Ravi Kohli · 2026-06-28
    Entscheidungen: E-016–E-046 · Finale Sprites, Test-Fixes, Leiter-Bug, App-Reward + App-Label
    Gate GO Richard 2026-06-27 · Asset-Integration CONDITIONAL GO 2026-06-28
    ============================================================ */
@@ -545,8 +545,10 @@ function render(){
   if(buildTutTimer>0){
     const fade=Math.min(1,Math.min(buildTutTimer,4.5-buildTutTimer+0.3)/0.4);
     cx.globalAlpha=Math.max(0,fade);
+    // v0.4.3: Vollbild-Abdunkler -> Plattformen/Labels treten zurueck, kein Kanten-Clash
+    cx.fillStyle='rgba(13,13,46,0.82)'; cx.fillRect(0,0,GW,GH);
     const px=30,py=GH/2-95,pw=GW-60,ph=172;
-    cx.fillStyle='rgba(10,10,40,0.96)'; cx.fillRect(px,py,pw,ph);
+    cx.fillStyle='rgba(10,10,40,0.98)'; cx.fillRect(px,py,pw,ph);
     cx.strokeStyle=C.yel;cx.lineWidth=2; cx.strokeRect(px,py,pw,ph);
 
     cx.textAlign='center';
@@ -785,12 +787,13 @@ function drawHUD(){
   cx.fillStyle='rgba(255,255,255,0.6)';cx.font='8px "Press Start 2P"';
   cx.fillText('LVL '+level,GW/2,25);
 
-  // Lives — Pixel-Rechtecke (kein Text, passt in 38px HUD)
-  const lx=GW/2-lives*11;
+  // Lives — Mini-Spielerfiguren (v0.4.3) statt "5"-Kaesten
+  const lifeW=10, lifeH=13, lstep=lifeW+4;
+  const lvx=GW/2-(Math.max(0,lives)*lstep-4)/2;
   for(let i=0;i<Math.max(0,lives);i++){
-    cx.fillStyle=C.blu; cx.fillRect(lx+i*22,29,18,8);
-    cx.fillStyle=C.yel;cx.font='8px "Press Start 2P"';cx.textAlign='center';
-    cx.fillText('5',lx+i*22+9,37);
+    const dx=lvx+i*lstep, dy=38-lifeH;
+    if(SPRITES['player-idle']) cx.drawImage(SPRITES['player-idle'], dx, dy, lifeW, lifeH);
+    else { cx.fillStyle=C.red; cx.fillRect(dx,dy+2,lifeW,lifeH-2); }
   }
 
   // Best rechts — lassen Platz für Gebäude-Icon
@@ -839,8 +842,13 @@ function drawMenu(){
     cx.fillText('HIGHSCORE: '+HS,GW/2,460);
     if(HS_LOOPS>0) cx.fillText('BEST LOOP: '+HS_LOOPS,GW/2,474);
   }
+  // v0.4.3: Start-Erklaerung — die App waechst pro Loop (mit Bild)
+  cx.fillStyle='rgba(255,255,255,0.78)';cx.font='7px "Press Start 2P"';cx.textAlign='center';
+  cx.fillText('JEDER LOOP BAUT DEINE APP:',GW/2,416);
+  { const aw=26,ah=23,ag=8,at=5*(aw+ag)-ag,axs=GW/2-at/2;
+    for(let st=1;st<=5;st++) drawBuildingShape(axs+(st-1)*(aw+ag),424,st,aw,ah,false); }
   cx.fillStyle='rgba(255,255,255,0.2)';cx.font='5px "Press Start 2P"';
-  cx.fillText('PROTO v0.4.2-bc',GW/2,540);
+  cx.fillText('PROTO v0.4.3-bc',GW/2,540);
 }
 
 // --- Game Over ---
