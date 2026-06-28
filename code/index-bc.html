@@ -38,7 +38,6 @@ canvas{display:block;image-rendering:pixelated;touch-action:none}
 #bU{bottom:calc(70px + env(safe-area-inset-bottom));right:104px;width:58px;height:52px;font-size:20px}
 #bD{bottom:calc(12px + env(safe-area-inset-bottom));right:104px;width:58px;height:52px;font-size:20px}
 #bJ{bottom:calc(12px + env(safe-area-inset-bottom));right:12px;width:84px;height:110px;font-size:9px;line-height:1.6}
-#bToggle{position:absolute;bottom:9%;left:50%;transform:translateX(-50%);padding:7px 12px;border:2px solid #4a9fd4;border-radius:6px;background:rgba(13,13,46,.88);color:#6bbde0;font-family:'Press Start 2P',monospace;font-size:9px;pointer-events:all;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;touch-action:none;display:none;white-space:nowrap}
 </style>
 </head>
 <body>
@@ -51,7 +50,6 @@ canvas{display:block;image-rendering:pixelated;touch-action:none}
   <div class="btn" id="bD">▼</div>
   <div class="btn" id="bJ">JUMP<br>↑</div>
 </div>
-<div id="bToggle">TOUCH-STEUERUNG: AN</div>
 </div>
 <script>
 /* ============================================================
@@ -113,12 +111,11 @@ const GW = 400, GH = 560;
 
 // Touch-Erkennung robust: iPadOS-Safari & manche Touch-Laptops melden kein 'ontouchstart'
 const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
-// v0.4.2: Touch-Steuerung umschaltbar (Overlay), Default = Touch-Geraet
-let touchUI; try{ const _t=localStorage.getItem('shb_bc_touchui'); touchUI = _t===null ? isTouch : _t==='1'; }catch(e){ touchUI=isTouch; }
 
 function resize() {
-  // v0.4.2 Overlay: Steuerung liegt UEBER dem Spielfeld → Handy nutzt volle Hoehe wie Desktop (kein Stauchen)
-  const s = Math.min(window.innerWidth / GW, window.innerHeight / GH);
+  const ctrlH = isTouch ? 124 : 0;
+  const s = Math.min(window.innerWidth / GW, window.innerHeight / (GH + ctrlH));
+  // F-1: Backing-Store in echten Geräte-Pixeln rendern (scharfer Text/Sprites), dpr auf 2 gedeckelt (Mobil-Perf)
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const r = s * dpr;
   cv.width  = Math.round(GW * r);
@@ -129,12 +126,13 @@ function resize() {
   cv.style.height = (GH * s) + 'px';
   const wrap = document.getElementById('wrap');
   wrap.style.width  = (GW * s) + 'px';
-  wrap.style.height = (GH * s) + 'px';
+  wrap.style.height = ((GH + ctrlH) * s) + 'px';
+  // Control-Leiste in Design-Pixeln halten, danach EINMAL skalieren (vorher: width=GW*s + scale(s) = doppelt skaliert)
   ctrl.style.width  = GW + 'px';
-  ctrl.style.height = '124px';
+  ctrl.style.height = ctrlH + 'px';
   ctrl.style.transform = `scale(${s})`;
   ctrl.style.transformOrigin = 'bottom left';
-  ctrl.style.display = touchUI ? 'block' : 'none';
+  if (isTouch) ctrl.style.display = 'block';
 }
 window.addEventListener('resize', resize);
 resize();
@@ -970,7 +968,6 @@ function loop(ts){
     winAnim-=dt;
     if(winAnim<=0) nextAct();
   }
-  bToggle.style.display=(state==='menu'||state==='over')?'block':'none';
   render();
   requestAnimationFrame(loop);
 }
@@ -986,11 +983,6 @@ window.addEventListener('keydown',e=>{
 cv.addEventListener('pointerdown',startOrRestart);
 // v0.4.1 (CC#2): JUMP-Button startet/neustartet auch per Touch
 document.getElementById('bJ').addEventListener('pointerdown',()=>{ if(state!=='play') startOrRestart(); });
-// v0.4.2: Toggle Touch-Steuerung (Overlay) an/aus, persistiert
-const bToggle=document.getElementById('bToggle');
-function syncToggle(){ bToggle.textContent = touchUI ? 'TOUCH-STEUERUNG: AN' : 'TOUCH-STEUERUNG: AUS'; }
-syncToggle();
-bToggle.addEventListener('pointerdown',e=>{ e.preventDefault(); e.stopPropagation(); touchUI=!touchUI; try{localStorage.setItem('shb_bc_touchui',touchUI?'1':'0');}catch(_){ } syncToggle(); resize(); });
 
 requestAnimationFrame(loop);
 </script>
