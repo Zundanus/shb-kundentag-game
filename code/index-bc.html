@@ -23,15 +23,15 @@ canvas{display:block;image-rendering:pixelated;touch-action:none}
 }
 .btn{
   position:absolute;
-  border:3px solid #f5c400;border-radius:8px;
-  background:rgba(245,196,0,.12);color:#f5c400;
+  border:3px solid #5a87bf;border-radius:8px;
+  background:rgba(74,159,212,.18);color:#cfe0f5;
   font-family:'Press Start 2P',monospace;
   display:flex;align-items:center;justify-content:center;
   pointer-events:all;user-select:none;
   -webkit-tap-highlight-color:transparent;cursor:pointer;
   touch-action:none;
 }
-.btn:active{background:rgba(245,196,0,.38)}
+.btn:active{background:rgba(74,159,212,.42)}
 /* v0.4.1 (E-048): Zwei-Daumen-Layout, alle Tasten >=44px, safe-area unten (CC#4) */
 #bL{bottom:calc(12px + env(safe-area-inset-bottom));left:10px;width:64px;height:64px;font-size:24px}
 #bR{bottom:calc(12px + env(safe-area-inset-bottom));left:86px;width:64px;height:64px;font-size:24px}
@@ -54,7 +54,7 @@ canvas{display:block;image-rendering:pixelated;touch-action:none}
 <script>
 /* ============================================================
    LEVEL UP! — BC Dev Cycle · SHB Kundentag 2026
-   Proto v0.4.3-bc · Studio Zundanus / Ravi Kohli · 2026-06-28
+   Proto v0.4.4-bc · Studio Zundanus / Ravi Kohli · 2026-06-28
    Entscheidungen: E-016–E-046 · Finale Sprites, Test-Fixes, Leiter-Bug, App-Reward + App-Label
    Gate GO Richard 2026-06-27 · Asset-Integration CONDITIONAL GO 2026-06-28
    ============================================================ */
@@ -113,9 +113,10 @@ const GW = 400, GH = 560;
 const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
 
 function resize() {
-  const ctrlH = isTouch ? 124 : 0;
-  const s = Math.min(window.innerWidth / GW, window.innerHeight / (GH + ctrlH));
-  // F-1: Backing-Store in echten Geräte-Pixeln rendern (scharfer Text/Sprites), dpr auf 2 gedeckelt (Mobil-Perf)
+  // v0.4.4: Steuerung ueberlappt die tote Boden-Zone (~70px unter P0) → nur 54px reservieren, Handy-Feld groesser
+  const reserve = isTouch ? 54 : 0;
+  const ctrlH   = isTouch ? 124 : 0;
+  const s = Math.min(window.innerWidth / GW, window.innerHeight / (GH + reserve));
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const r = s * dpr;
   cv.width  = Math.round(GW * r);
@@ -126,10 +127,9 @@ function resize() {
   cv.style.height = (GH * s) + 'px';
   const wrap = document.getElementById('wrap');
   wrap.style.width  = (GW * s) + 'px';
-  wrap.style.height = ((GH + ctrlH) * s) + 'px';
-  // Control-Leiste in Design-Pixeln halten, danach EINMAL skalieren (vorher: width=GW*s + scale(s) = doppelt skaliert)
+  wrap.style.height = ((GH + reserve) * s) + 'px';
   ctrl.style.width  = GW + 'px';
-  ctrl.style.height = ctrlH + 'px';
+  ctrl.style.height = ctrlH + 'px'; // volle Button-Hoehe, ragt nach oben in die Boden-Zone
   ctrl.style.transform = `scale(${s})`;
   ctrl.style.transformOrigin = 'bottom left';
   if (isTouch) ctrl.style.display = 'block';
@@ -849,7 +849,7 @@ function drawMenu(){
   { const aw=26,ah=23,ag=8,at=5*(aw+ag)-ag,axs=GW/2-at/2;
     for(let st=1;st<=5;st++) drawBuildingShape(axs+(st-1)*(aw+ag),424,st,aw,ah,false); }
   cx.fillStyle='rgba(255,255,255,0.2)';cx.font='5px "Press Start 2P"';
-  cx.fillText('PROTO v0.4.3-bc',GW/2,540);
+  cx.fillText('PROTO v0.4.4-bc',GW/2,540);
 }
 
 // --- Game Over ---
