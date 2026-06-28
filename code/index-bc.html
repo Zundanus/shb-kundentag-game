@@ -54,7 +54,7 @@ canvas{display:block;image-rendering:pixelated;touch-action:none}
 <script>
 /* ============================================================
    LEVEL UP! — BC Dev Cycle · SHB Kundentag 2026
-   Proto v0.4.1-bc · Studio Zundanus / Ravi Kohli · 2026-06-28
+   Proto v0.4.2-bc · Studio Zundanus / Ravi Kohli · 2026-06-28
    Entscheidungen: E-016–E-046 · Finale Sprites, Test-Fixes, Leiter-Bug, App-Reward + App-Label
    Gate GO Richard 2026-06-27 · Asset-Integration CONDITIONAL GO 2026-06-28
    ============================================================ */
@@ -444,7 +444,7 @@ function updateBarrels(dt){
     if(b.y>GH+80||b.x<-80||b.x>GW+80){barrels.splice(i,1);continue;}
 
     // Kollision
-    if(!P.dead&&b.x+b.w-3>P.x+3&&b.x+3<P.x+P.w-3&&b.y+b.h-2>P.y+5&&b.y+2<P.y+P.h-2){
+    if(!P.dead&&b.x+b.w-7>P.x+3&&b.x+7<P.x+P.w-3&&b.y+b.h-4>P.y+5&&b.y+4<P.y+P.h-2){ // v0.4.2 (T-4): Trefferbox enger
       P.dead=true;P.deathTimer=0.9;hitFlash=0.7;
       barrels.splice(i,1);continue;
     }
@@ -452,7 +452,7 @@ function updateBarrels(dt){
     // Typisierter Jump-Bonus (E-019)
     if(!b.jumpScored&&!P.dead&&!P.onGround&&!P.climbing&&P.vy>0){
       const bCx=b.x+b.w/2, pCx=P.x+P.w/2;
-      if(Math.abs(bCx-pCx)<40&&b.y>=P.y+P.h-8){
+      if(Math.abs(bCx-pCx)<40&&b.y>=P.y+P.h-8&&b.y<=P.y+P.h+12){ // v0.4.2 (CC#6): kein Bonus fuer Faesser eine Ebene tiefer
         b.jumpScored=true;
         const jp=BARREL_TYPES[b.type].pts*level;
         score+=jp;
@@ -619,7 +619,7 @@ function drawKong(){
   const KW=58, KH=64;                 // 65x72-Verhältnis, auf Spielgröße skaliert
   const kx=308, ky=PLATS[4].y-KH+4;   // Füße knapp auf P4 (y=130)
   // --- Stehendes Fass links vor Gorilla (barrel-stand 41x56) ---
-  const SBW=30, SBH=41;
+  const SBW=18, SBH=25; // v0.4.2 (T-6): deutlich kleiner als Gorilla (Holger-Re-Test)
   const sfx = BARREL_STAGE.x - 4;
   const sfy = PLATS[4].y - SBH;        // steht auf P4
   if(SPRITES['barrel-stehend']){
@@ -820,13 +820,13 @@ function drawMenu(){
     if(!drawBarrelStatic(k,x-12,y,30,22)){
       cx.fillStyle=t.color;cx.fillRect(x-12,y+4,22,14);
     }
-    cx.fillStyle=t.color;cx.font='5px "Press Start 2P"';cx.textAlign='center';
+    cx.fillStyle=t.color;cx.font='10px "Press Start 2P"';cx.textAlign='center';
     cx.fillText(t.label,x,y+34);
-    cx.fillStyle='rgba(255,255,255,0.6)';cx.font='4px "Press Start 2P"';
+    cx.fillStyle='rgba(255,255,255,0.6)';cx.font='8px "Press Start 2P"';
     cx.fillText(t.pts+'pt',x,y+44);
   });
 
-  cx.fillStyle='rgba(74,159,212,0.7)';cx.font='5px "Press Start 2P"';cx.textAlign='center';
+  cx.fillStyle='rgba(74,159,212,0.7)';cx.font='8px "Press Start 2P"';cx.textAlign='center';
   cx.fillText('← →  LAUFEN   ↑  LEITER   SPACE  SPRINGEN',GW/2,340);
 
   if(Date.now()%900<500){
@@ -835,12 +835,12 @@ function drawMenu(){
     cx.fillText('ZUM STARTEN',GW/2,398);
   }
   if(HS>0){
-    cx.fillStyle=C.blu;cx.font='6px "Press Start 2P"';
+    cx.fillStyle=C.blu;cx.font='9px "Press Start 2P"';
     cx.fillText('HIGHSCORE: '+HS,GW/2,460);
     if(HS_LOOPS>0) cx.fillText('BEST LOOP: '+HS_LOOPS,GW/2,474);
   }
   cx.fillStyle='rgba(255,255,255,0.2)';cx.font='5px "Press Start 2P"';
-  cx.fillText('PROTO v0.4.1-bc',GW/2,540);
+  cx.fillText('PROTO v0.4.2-bc',GW/2,540);
 }
 
 // --- Game Over ---
@@ -853,7 +853,7 @@ function drawOver(){
   cx.fillText('LOOPS:  '+buildLoops,GW/2,244);
   cx.fillText('BEST:   '+HS,GW/2,268);
   if(score>=HS&&score>0){
-    cx.fillStyle=C.yel;cx.font='7px "Press Start 2P"';
+    cx.fillStyle=C.yel;cx.font='9px "Press Start 2P"';
     cx.fillText('★ NEUER HIGHSCORE! ★',GW/2,295);
   }
   // Gebäude-Vergleich (neue Signatur: bx,by,stage,W,H,ghost)
@@ -876,7 +876,7 @@ function drawOver(){
   cx.fillStyle='rgba(255,255,255,0.35)';cx.font='8px "Press Start 2P"';
   cx.fillText('kommt in Sprint 2',GW/2,428);
   if(Date.now()%900<500){
-    cx.fillStyle=C.wht;cx.font='7px "Press Start 2P"';
+    cx.fillStyle=C.wht;cx.font='9px "Press Start 2P"';
     cx.fillText('TIPPEN = NOCHMAL',GW/2,470);
   }
 }
