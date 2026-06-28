@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>LEVEL UP! — BC Dev Cycle · SHB 2026</title>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 <style>
@@ -15,26 +15,29 @@ body{
   font-family:'Press Start 2P',monospace;
 }
 #wrap{position:relative;display:flex;flex-direction:column;align-items:center}
-canvas{display:block;image-rendering:pixelated}
+canvas{display:block;image-rendering:pixelated;touch-action:none}
 #ctrl{
   display:none;
   position:absolute;bottom:0;left:0;right:0;
-  height:110px;pointer-events:none;
+  height:124px;pointer-events:none;
 }
 .btn{
   position:absolute;
-  border:3px solid #f5c400;border-radius:6px;
+  border:3px solid #f5c400;border-radius:8px;
   background:rgba(245,196,0,.12);color:#f5c400;
   font-family:'Press Start 2P',monospace;
   display:flex;align-items:center;justify-content:center;
   pointer-events:all;user-select:none;
   -webkit-tap-highlight-color:transparent;cursor:pointer;
+  touch-action:none;
 }
 .btn:active{background:rgba(245,196,0,.38)}
-#bL{bottom:10px;left:8px;width:58px;height:58px;font-size:22px}
-#bU{bottom:76px;left:42px;width:58px;height:30px;font-size:14px}
-#bR{bottom:10px;left:76px;width:58px;height:58px;font-size:22px}
-#bJ{bottom:10px;right:8px;width:88px;height:58px;font-size:8px;line-height:1.6}
+/* v0.4.1 (E-048): Zwei-Daumen-Layout, alle Tasten >=44px, safe-area unten (CC#4) */
+#bL{bottom:calc(12px + env(safe-area-inset-bottom));left:10px;width:64px;height:64px;font-size:24px}
+#bR{bottom:calc(12px + env(safe-area-inset-bottom));left:86px;width:64px;height:64px;font-size:24px}
+#bU{bottom:calc(70px + env(safe-area-inset-bottom));right:104px;width:58px;height:52px;font-size:20px}
+#bD{bottom:calc(12px + env(safe-area-inset-bottom));right:104px;width:58px;height:52px;font-size:20px}
+#bJ{bottom:calc(12px + env(safe-area-inset-bottom));right:12px;width:84px;height:110px;font-size:9px;line-height:1.6}
 </style>
 </head>
 <body>
@@ -42,15 +45,16 @@ canvas{display:block;image-rendering:pixelated}
 <canvas id="c"></canvas>
 <div id="ctrl">
   <div class="btn" id="bL">◀</div>
-  <div class="btn" id="bU">▲</div>
   <div class="btn" id="bR">▶</div>
+  <div class="btn" id="bU">▲</div>
+  <div class="btn" id="bD">▼</div>
   <div class="btn" id="bJ">JUMP<br>↑</div>
 </div>
 </div>
 <script>
 /* ============================================================
    LEVEL UP! — BC Dev Cycle · SHB Kundentag 2026
-   Proto v0.4-bc · Studio Zundanus / Ravi Kohli · 2026-06-28
+   Proto v0.4.1-bc · Studio Zundanus / Ravi Kohli · 2026-06-28
    Entscheidungen: E-016–E-046 · Finale Sprites, Test-Fixes, Leiter-Bug, App-Reward + App-Label
    Gate GO Richard 2026-06-27 · Asset-Integration CONDITIONAL GO 2026-06-28
    ============================================================ */
@@ -109,7 +113,7 @@ const GW = 400, GH = 560;
 const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
 
 function resize() {
-  const ctrlH = isTouch ? 110 : 0;
+  const ctrlH = isTouch ? 124 : 0;
   const s = Math.min(window.innerWidth / GW, window.innerHeight / (GH + ctrlH));
   // F-1: Backing-Store in echten Geräte-Pixeln rendern (scharfer Text/Sprites), dpr auf 2 gedeckelt (Mobil-Perf)
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -212,7 +216,7 @@ function mkBtn(id,code){
   el.addEventListener('pointerleave',off);
 }
 mkBtn('bL','ArrowLeft'); mkBtn('bR','ArrowRight');
-mkBtn('bU','ArrowUp');   mkBtn('bJ','Space');
+mkBtn('bU','ArrowUp');   mkBtn('bD','ArrowDown'); mkBtn('bJ','Space');
 const L=()=>K.ArrowLeft||K.KeyA;
 const R=()=>K.ArrowRight||K.KeyD;
 const UP=()=>K.ArrowUp||K.KeyW;
@@ -277,6 +281,7 @@ function initGame(){
   act=0; cycle=0; buildLoops=0;
   score=0; scoreAcc=0; hitFlash=0; winAnim=0; floaters=[];
   spawnFreeze=1.5; spawnT=1.5; spawnI=actSpawnI();
+  buildTutTimer=0; // v0.4.1 (CC#8): Tutorial-Popup nicht in frischen Run schleppen
   state='play';
 }
 function resetPlayer(){
@@ -534,7 +539,6 @@ function render(){
   if(hitFlash>0){
     cx.fillStyle=`rgba(255,50,50,${hitFlash*0.3})`;
     cx.fillRect(0,0,GW,GH);
-    hitFlash=Math.max(0,hitFlash-0.06);
   }
 
   // Gebäude-Tutorial-Popup (nach erstem Loop)
@@ -625,7 +629,6 @@ function drawKong(){
     cx.fillStyle='#3a6fbf'; cx.fillRect(sfx+4,sfy,28,38);
     cx.fillStyle='#f5c400'; cx.fillRect(sfx+2,sfy+10,32,4); cx.fillRect(sfx+2,sfy+24,32,4);
   }
-  kongWobble+=0.003;
   const wobbleX = kongPushT>0 ? 4 : Math.sin(kongWobble*80)*1.5;
   const wobbleY = kongPushT>0 ? 2 : 0;
   // Beim Schieben (kongPushT>0) Wurf-Pose = gorilla0 (Arm hoch/rechts), sonst sanfter 2-Frame-Idle
@@ -652,7 +655,6 @@ function drawKong(){
     cx.fillStyle=C.yel;
     cx.beginPath();cx.ellipse(ox+40,oy+8,6,6,Date.now()*0.003,0,Math.PI*2);cx.fill();
   }
-  if(kongPushT>0) kongPushT=Math.max(0,kongPushT-0.016);
 }
 
 // --- Sprite-Sheet-Helper (Integration 2026-06-28): zeichnet Frame f aus horizontalem Sheet ---
@@ -838,7 +840,7 @@ function drawMenu(){
     if(HS_LOOPS>0) cx.fillText('BEST LOOP: '+HS_LOOPS,GW/2,474);
   }
   cx.fillStyle='rgba(255,255,255,0.2)';cx.font='5px "Press Start 2P"';
-  cx.fillText('PROTO v0.4-bc',GW/2,540);
+  cx.fillText('PROTO v0.4.1-bc',GW/2,540);
 }
 
 // --- Game Over ---
@@ -875,7 +877,7 @@ function drawOver(){
   cx.fillText('kommt in Sprint 2',GW/2,428);
   if(Date.now()%900<500){
     cx.fillStyle=C.wht;cx.font='7px "Press Start 2P"';
-    cx.fillText('SPACE = NOCHMAL',GW/2,470);
+    cx.fillText('TIPPEN = NOCHMAL',GW/2,470);
   }
 }
 
@@ -938,9 +940,10 @@ function drawWin(){
 
   // App-Reward (E-046, pro Loop): die App, die entsteht — groß im Win-Screen
   const appStage = Math.min(Math.max(buildLoops,1),MAX_STAGE);
-  if(SPRITES['app-'+appStage]){
+  {
     const aw=104, ah=91, ax=GW/2-aw/2, ay=330;
-    cx.drawImage(SPRITES['app-'+appStage], ax, ay, aw, ah);
+    if(SPRITES['app-'+appStage]) cx.drawImage(SPRITES['app-'+appStage], ax, ay, aw, ah);
+    else drawBuildingShape(ax, ay, appStage, aw, ah, false); // v0.4.1 (CC#7): Canvas-Fallback
     cx.fillStyle=C.blu;cx.font='8px "Press Start 2P"';cx.textAlign='center';
     cx.fillText('DEINE APP  '+appStage+'/'+MAX_STAGE, GW/2, ay+ah+14);
   }
@@ -953,6 +956,10 @@ function loop(ts){
   if(state==='play'){
     updatePlayer(dt);
     updateBarrels(dt);
+    // v0.4.1 (CC#5): Render-Timer dt-basiert (120-Hz-stabil)
+    if(hitFlash>0) hitFlash=Math.max(0,hitFlash-dt*3.6);
+    kongWobble+=dt*0.18;
+    if(kongPushT>0) kongPushT=Math.max(0,kongPushT-dt);
     for(const f of floaters){f.life-=dt;f.y-=38*dt;}
     floaters=floaters.filter(f=>f.life>0);
     if(buildTutTimer>0) buildTutTimer-=dt;
@@ -966,16 +973,16 @@ function loop(ts){
 }
 
 // --- Start ---
+function startOrRestart(){
+  if(state==='menu'){ initGame(); }
+  else if(state==='over'){ level=1; lives=3; initGame(); }
+}
 window.addEventListener('keydown',e=>{
-  if(e.code==='Space'||e.code==='Enter'){
-    if(state==='menu') initGame();
-    else if(state==='over'){level=1;lives=3;initGame();}
-  }
+  if(e.code==='Space'||e.code==='Enter') startOrRestart();
 });
-cv.addEventListener('pointerdown',()=>{
-  if(state==='menu') initGame();
-  else if(state==='over'){level=1;lives=3;initGame();}
-});
+cv.addEventListener('pointerdown',startOrRestart);
+// v0.4.1 (CC#2): JUMP-Button startet/neustartet auch per Touch
+document.getElementById('bJ').addEventListener('pointerdown',()=>{ if(state!=='play') startOrRestart(); });
 
 requestAnimationFrame(loop);
 </script>
