@@ -282,6 +282,7 @@ function initGame(){
   score=0; scoreAcc=0; hitFlash=0; winAnim=0; floaters=[];
   spawnFreeze=1.5; spawnT=1.5; spawnI=actSpawnI();
   buildTutTimer=0; // v0.4.1 (CC#8): Tutorial-Popup nicht in frischen Run schleppen
+  if(!buildTutShown){ buildTutTimer=4.0; buildTutShown=true; spawnFreeze=Math.max(spawnFreeze,buildTutTimer); } // v0.4.3: App-Tutorial schon im 1. Level; Spawns solange einfrieren
   state='play';
 }
 function resetPlayer(){
@@ -587,8 +588,8 @@ function render(){
     cx.globalAlpha=1;
   }
 
-  // Akt-Intro Banner während Spawn-Freeze
-  if(state==='play' && spawnFreeze>0){
+  // Akt-Intro Banner während Spawn-Freeze (nicht während des Tutorials -> kein Ueberblenden, v0.4.3)
+  if(state==='play' && spawnFreeze>0 && buildTutTimer<=0){
     const fadeIn=Math.min(1,(2.5-spawnFreeze)/0.3);
     const fadeOut=spawnFreeze<0.5?spawnFreeze/0.5:1;
     const a=Math.min(fadeIn,fadeOut);
