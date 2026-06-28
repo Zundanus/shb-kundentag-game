@@ -450,9 +450,9 @@ function updateBarrels(dt){
     }
 
     // Typisierter Jump-Bonus (E-019)
-    if(!b.jumpScored&&!P.dead&&!P.onGround&&!P.climbing&&P.vy>0){
+    if(!b.jumpScored&&!P.dead&&!P.onGround&&!P.climbing){ // v0.4.2-fix: auch im Aufstieg zaehlen (Punkte zuverlaessig)
       const bCx=b.x+b.w/2, pCx=P.x+P.w/2;
-      if(Math.abs(bCx-pCx)<40&&b.y>=P.y+P.h-8&&b.y<=P.y+P.h+12){ // v0.4.2 (CC#6): kein Bonus fuer Faesser eine Ebene tiefer
+      if(Math.abs(bCx-pCx)<40&&b.y>=P.y+P.h-8&&b.y<=P.y+P.h+50){ // v0.4.2 (CC#6): Band weit genug fuer echte Spruenge, blockt aber Ebene tiefer (~90px)
         b.jumpScored=true;
         const jp=BARREL_TYPES[b.type].pts*level;
         score+=jp;
@@ -619,7 +619,7 @@ function drawKong(){
   const KW=58, KH=64;                 // 65x72-Verhältnis, auf Spielgröße skaliert
   const kx=308, ky=PLATS[4].y-KH+4;   // Füße knapp auf P4 (y=130)
   // --- Stehendes Fass links vor Gorilla (barrel-stand 41x56) ---
-  const SBW=18, SBH=25; // v0.4.2 (T-6): deutlich kleiner als Gorilla (Holger-Re-Test)
+  const SBW=20, SBH=28; // v0.4.2 (T-6): Vorschlag -2px (Holger), nahe Rollfass-Durchmesser
   const sfx = BARREL_STAGE.x - 4;
   const sfy = PLATS[4].y - SBH;        // steht auf P4
   if(SPRITES['barrel-stehend']){
