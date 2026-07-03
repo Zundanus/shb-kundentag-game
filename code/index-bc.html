@@ -154,11 +154,12 @@ const C = {
 
 // --- Barrel-Typen (E-018, E-019) ---
 const BARREL_TYPES = {
-  bug:         { pts:5,  color:'#cc2200', label:'BUG', weight:50 },
-  config:      { pts:10, color:'#7a8a9a', label:'CFG', weight:22 },
-  anforderung: { pts:20, color:'#4a9fd4', label:'ANF', weight:15 },
-  entwicklung: { pts:30, color:'#7c3aed', label:'DEV', weight:8  },
-  schulung:    { pts:50, color:'#f5c400', label:'SCH', weight:5  },
+  // v0.9 (E-073/M2): Vibe-Gewichte (mehr Typen-Mix) + Typ-Tempo spd (wertvoll = schneller, Risk/Reward)
+  bug:         { pts:5,  color:'#cc2200', label:'BUG', weight:36, spd:1.0  },
+  config:      { pts:10, color:'#7a8a9a', label:'CFG', weight:24, spd:1.08 },
+  anforderung: { pts:20, color:'#4a9fd4', label:'ANF', weight:18, spd:1.18 },
+  entwicklung: { pts:30, color:'#7c3aed', label:'DEV', weight:12, spd:1.32 },
+  schulung:    { pts:50, color:'#f5c400', label:'SCH', weight:8,  spd:1.4  }, // v0.9.1 (E-074): 1,5→1,4 — Holger: "echt HART" (232→217 px/s in Akt 3)
 };
 // Gewichteter Pool
 const BARREL_POOL = [];
@@ -186,9 +187,19 @@ const ACT_DESC = [
   '+Schulung — alles auf einmal!',
 ];
 
+// v0.9 (E-073/M2): Typen-Cap je App (KONZEPT §2 — App 1 nur BUG/CFG, App 2 +ANF, ab App 3 alles)
+const APP_TYPES = [ ['bug','config'], ['bug','config','anforderung'], ['bug','config','anforderung','entwicklung'] ]; // v0.9.1 (E-074): DEV ab App 3, SCH erst ab App 4 — Speed-Kurve entzerrt
+function appAllowedTypes(){ return appsShipped < APP_TYPES.length ? APP_TYPES[appsShipped] : null; }
 function randomBarrelType(act) {
   const allowed = ACT_TYPES[act];
-  const pool = BARREL_POOL.filter(t => allowed.includes(t));
+  const appCap = appAllowedTypes();
+  let pool = BARREL_POOL.filter(t => allowed.includes(t) && (!appCap || appCap.includes(t)));
+  // Schnell-Fass-Deckel (E-073, Holger): max. 1 Fass mit spd >= 1.3 gleichzeitig auf dem Schirm
+  if(barrels.some(b => BARREL_TYPES[b.type].spd >= 1.3)){
+    const slow = pool.filter(t => BARREL_TYPES[t].spd < 1.3);
+    if(slow.length) pool = slow;
+  }
+  if(!pool.length) pool = ['bug'];
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
@@ -208,6 +219,39 @@ const LADDERS = [
   {x: 36, yt:130, yb:220},
 ];
 const BSPAWN = {x:358, y:104}; // über P4 (y=130-28+2=104)
+
+// --- v0.9-bc (E-073/M1): Löcher — app-basiert generiert (KONZEPT v2 §2/H3, F-5) ---
+// Regeln (F-5): nur P1–P3, nie unter Leitern (+28px Landepuffer), nie am Rand,
+// >=90px Abstand zwischen Löchern, max 2 pro Ebene, Breite <= GAP_WMAX (< Sprungweite ~100px).
+// Skalierung app-basiert (NICHT level-basiert wie im Vibe-Stand): App 1 lochfrei (F-3).
+const GAPS=[];
+const GAP_WMAX=60;   // harter Deckel (F-5), tunebar 36–60 (Holger: "ein Ticken kleiner")
+const GAP_DROP_CHANCE=0.10; // v0.9.1 (E-074, Holger): Fass kippt mit 10% durchs Loch — erst ab App 3 (F-5c)
+function gapCount(){ return Math.min(appsShipped, 6); } // v0.9.1 (E-074, Holger): +1 Loch pro App — App2: 1, App3: 2 … Deckel 6
+function gapBaseW(){ return Math.min(56, 40+4*appsShipped); }                    // v0.9.1: flacher — 44 → 48 → 52 → 56 (±4 Jitter)
+function generateGaps(){
+  GAPS.length=0;
+  const total=gapCount();
+  const per={1:0,2:0,3:0};
+  let guard=0;
+  while(GAPS.length<total && guard++<300){
+    const pi=1+Math.floor(Math.random()*3);
+    if(per[pi]>=2) continue;                    // max 2 pro Ebene (F-5)
+    const p=PLATS[pi];
+    const w=Math.min(GAP_WMAX, gapBaseW()+Math.floor(Math.random()*9)-4);
+    const x=p.x+22+Math.random()*(p.w-44-w);    // nie am Plattformrand
+    let ok=true;
+    for(const l of LADDERS){ if(x<l.x+LW+28 && x+w>l.x-28){ok=false;break;} }    // Leitern + Landepunkte frei
+    if(ok) for(const g of GAPS){ if(g.plat===pi && x<g.x+g.w+90 && x+w>g.x-90){ok=false;break;} }
+    if(!ok) continue;
+    GAPS.push({plat:pi, x:Math.round(x), w:Math.round(w)});
+    per[pi]++;
+  }
+}
+function gapAt(pi,cxx){
+  for(const g of GAPS) if(g.plat===pi && cxx>g.x && cxx<g.x+g.w) return g;
+  return null;
+}
 
 // --- Input ---
 const K = {};
@@ -239,11 +283,19 @@ const P={
 };
 
 // --- Game state ---
+const VERSION='v0.9.9-bc'; // v0.9.7 (E-080): eine Quelle für die Versionsnummer (Menü + Dev-Anzeige)
+const DEV_BUILD=true;      // Holger: Versionsanzeige im Spiel — vor dem Kundentag auf false stellen
 let barrels=[], state='menu';
 let score=0, scoreAcc=0, level=1, lives=3;
 let act=0, cycle=0;       // E-023: Akt-System
 let spawnT=1.5, spawnI=2.8; // Erstes Fass nach 1.5s
 let spawnFreeze=1.5;        // Spawn-Freeze Countdown
+// v0.6-bc (E-066): kontinuierlicher Fass-Zyklus — sofort Action, dann Ziel-Population
+let moveStarted=false;      // Spieler in diesem Akt schon losgelauft? (erstes Fass sofort)
+let lastSpawn=null;         // (ungenutzt seit E-071)
+let pendingWave=0;          // v0.8 (E-072): noch freizugebende Fässer der aktuellen Welle
+let spawnStopped=false;     // v0.9 (E-073/M3): "FÄSSER GESTOPPT!"-Banner einmal pro Akt
+let spawnHaltedNow=false;   // v0.9.2 (E-075): Live-Zustand Zielgerade (fürs Stehfass-Ausblenden)
 let hitFlash=0, winAnim=0, winBonus=0;
 let floaters=[];
 let buildTutTimer=0; // >0 = Gebäude-Tutorial-Popup aktiv
@@ -253,6 +305,14 @@ let buildTutShown=false; // nur einmal zeigen
 let HS, HS_LOOPS;
 try { HS=+localStorage.getItem('shb_bc_hs')||0; } catch(e){HS=0;}
 try { HS_LOOPS=+localStorage.getItem('shb_bc_loops')||0; } catch(e){HS_LOOPS=0;}
+
+// v0.5-bc (A1, E-061): ausgelieferte Apps sichtbar machen — App-Zaehler + Skyline
+let appsShipped=0;   // fertige Apps im aktuellen Run
+let actsIntoApp=0;   // Akte seit der letzten fertigen App
+let appDoneTimer=0;  // >0 = "APP FERTIG"-Moment sichtbar
+let HS_APPS;
+const appActsNeeded=()=>Math.min(5, 3+appsShipped); // v0.9 (E-073/M2b, Holger): App-Rampe 3→4→5 Akte (Deckel 5), ersetzt APP_ACTS_BASE=4+1
+try { HS_APPS=+localStorage.getItem('shb_bc_apps')||0; } catch(e){HS_APPS=0;}
 
 // Gebäude-Loops (E-026)
 let buildLoops=0; // wie viele Loops im aktuellen Run abgeschlossen
@@ -267,9 +327,10 @@ const KONG_THROW_DUR=0.8;    // Wurfdauer (langsam), #Gorilla-RD
 function addFloat(x,y,text){floaters.push({x,y,text,life:1.2});}
 
 function actSpeed() {
-  // E-024: Basis-Speed pro Akt, +15% pro Zyklus
-  const base=[80,115,155][act];
-  return base * Math.pow(1.15, cycle);
+  // v0.9.2 (E-075, Holger): Tempo hängt NUR an der App — innerhalb einer App konstant („Speed halten").
+  // Rampe ~×1,15 pro App, Deckel App 5 (Max-Punkt E-074). Ersetzt Akt-Rampe (E-024) + Cycle-Multiplikator.
+  const APP_SPEED=[80, 92, 106, 122, 140];
+  return APP_SPEED[Math.min(appsShipped, APP_SPEED.length-1)];
 }
 function actSpawnI() {
   const base=[2.8,2.0,1.4][act];
@@ -288,8 +349,11 @@ function ladderAt(e){
 function initGame(){
   resetPlayer(); barrels=[];
   act=0; cycle=0; buildLoops=0;
+  appsShipped=0; actsIntoApp=0; appDoneTimer=0; // v0.5-bc (A1): App-Fortschritt frisch
   score=0; scoreAcc=0; hitFlash=0; winAnim=0; floaters=[];
   spawnFreeze=1.5; spawnT=1.5; spawnI=actSpawnI();
+  moveStarted=false; lastSpawn=null; pendingWave=0; spawnStopped=false; // v0.8 (E-072): Zyklus/Welle frisch
+  generateGaps(); // v0.9 (E-073/M1): frische Löcher pro Run (App 1 lochfrei)
   buildTutTimer=0; // v0.4.1 (CC#8): Tutorial-Popup nicht in frischen Run schleppen
   if(!buildTutShown){ buildTutTimer=4.0; buildTutShown=true; spawnFreeze=Math.max(spawnFreeze,buildTutTimer); } // v0.4.3: App-Tutorial schon im 1. Level; Spawns solange einfrieren
   state='play';
@@ -306,20 +370,26 @@ function nextAct(){
     if(!buildTutShown){buildTutTimer=4.5;buildTutShown=true;} // Tutorial einmal nach Loop 1
   }
   level++;
+  // v0.5-bc (A1): jeder abgeschlossene Akt zaehlt Richtung fertiger App (Milo-Rampe #036)
+  actsIntoApp++;
+  if(actsIntoApp >= appActsNeeded()){ appsShipped++; actsIntoApp=0; appDoneTimer=1.8; }
   resetPlayer(); barrels=[];
-  spawnFreeze=2.5; spawnT=2.5; spawnI=actSpawnI(); // kurze Pause zwischen Akten
+  spawnFreeze=1.2; spawnT=1.2; spawnI=actSpawnI(); // v0.5.3: kuerzere Pause -> keine leeren Akte
+  moveStarted=false; lastSpawn=null; pendingWave=0; spawnStopped=false; // v0.8 (E-072): Zyklus/Welle pro Akt neu
+  generateGaps(); // v0.9 (E-073/M1): Löcher pro Akt neu würfeln (Anzahl/Breite per App-Staffel)
   hitFlash=0; winAnim=0; state='play';
 }
 
 // Stehend-Fass-Position (links vor Gorilla, auf P4)
-const BARREL_STAGE = {x:272, y:PLATS[4].y-23}; // sitzt auf P4 (Fass-Höhe 23, F-2)
+const BARREL_STAGE = {x:272, y:PLATS[4].y-20}; // sitzt auf P4 (Fass-Höhe 20 seit E-081)
+const WIN_BOX = {x:306, w:40}; // v0.9 (E-073/M3): MAN-Box des Gorillaman (kx=304) — Berührung gewinnt
 
 // --- Barrel spawnen — kurze Pause am Stapelplatz ---
 function spawnBarrel(){
   const type=randomBarrelType(act);
   barrels.push({
     x:BARREL_STAGE.x-28, y:BARREL_STAGE.y, // F-3: vor dem Stehfass erscheinen (links davor), dann rollen
-    w:30, h:23, // F-2: Maßstab an Figur angepasst (Verhältnis 1,3 bleibt)
+    w:26, h:20, // v0.9.8 (E-081, Lena): einen Ticken kleiner (30×23 → 26×20) — Proportion zur 22-px-Figur, Verhältnis 1,3 bleibt
     vx:0, vy:0,
     onGround:true, platIdx:4,
     frame:0, frameT:0,
@@ -340,8 +410,9 @@ function updatePlayer(dt){
         state='over';
         if(score>HS){ HS=score; try{localStorage.setItem('shb_bc_hs',HS);}catch(e){} }
         if(buildLoops>HS_LOOPS){ HS_LOOPS=buildLoops; try{localStorage.setItem('shb_bc_loops',HS_LOOPS);}catch(e){} }
+        if(appsShipped>HS_APPS){ HS_APPS=appsShipped; try{localStorage.setItem('shb_bc_apps',HS_APPS);}catch(e){} } // v0.5-bc (A1)
       } else {
-        resetPlayer(); barrels=[]; spawnFreeze=2; spawnT=2; hitFlash=0;
+        resetPlayer(); barrels=[]; spawnFreeze=2; spawnT=2; hitFlash=0; spawnStopped=false; // M3: Zielgerade neu verdienen
       }
     }
     return;
@@ -371,6 +442,8 @@ function updatePlayer(dt){
     if(JP()&&P.onGround&&!P.jumpLock){P.vy=-285;P.onGround=false;P.jumpLock=true;} // 285²/1800=45px — passt für 90px Abstand
     if(!JP()) P.jumpLock=false;
   }
+  // v0.6-bc (E-066): sobald der Spieler losläuft, sofort das erste Fass — dann kontinuierlicher Zyklus
+  if(!moveStarted && (L()||R()||UP()||DN())){ moveStarted=true; spawnFreeze=0; lastSpawn=null; }
   const prevY=P.y;
   P.x+=P.vx*dt; P.y+=P.vy*dt;
   P.x=Math.max(0,Math.min(GW-P.w,P.x));
@@ -383,6 +456,7 @@ function updatePlayer(dt){
   if(!P.climbing&&P.vy>=0){
     for(let pi=0;pi<PLATS.length;pi++){
       const p=PLATS[pi];
+      if(pi>0 && gapAt(pi, P.x+P.w/2)) continue; // v0.9 (M1): über einem Loch fängt nichts — Spieler fällt durch (P0/P4 nie gelocht, F-5)
       // P0 = solider Boden: fängt immer (kein Durchfallen ins Leere); obere Plattformen nur von oben
       const onX = P.x+P.w>p.x+6 && P.x<p.x+p.w-6;
       const catchY = P.y+P.h>=p.y && (pi===0 ? true : prevY+P.h<=p.y+3);
@@ -392,15 +466,15 @@ function updatePlayer(dt){
           P.highestPlat=pi;
           if(pi<4){const b=pi*200;score+=b;addFloat(P.x+P.w/2,P.y-8,'+'+b);}
         }
-        if(pi===4){
-          winBonus=1000+level*200;
-          score+=winBonus;
-          addFloat(GW/2,GH/2+40,'+'+winBonus+'!!');
-          winAnim=1.8; state='winanim';
-        }
         break;
       }
     }
+  }
+  // v0.9 (E-073/M3): Sieg = Berührung der MAN-Box des SHB-Kollegen (vereinheitlicht mit Vibe; E-072-Gate bleibt)
+  if(state==='play' && P.onGround && P.highestPlat>=4 && P.x+P.w>=WIN_BOX.x && P.x<=WIN_BOX.x+WIN_BOX.w){
+    winBonus=1000+level*200; score+=winBonus;
+    addFloat(GW/2,GH/2+40,'+'+winBonus+'!!');
+    winAnim=1.8; state='winanim';
   }
   if(P.y>GH+60){P.x=30;P.y=470;P.vy=0;}
   P.frameT+=dt;
@@ -418,23 +492,46 @@ function updateBarrels(dt){
   // Spawn-Freeze (E-025)
   if(spawnFreeze>0){ spawnFreeze-=dt; return; }
 
-  // Cap: max 4 Fässer (E-024)
-  spawnT-=dt;
-  if(spawnT<=0&&barrels.length<4){ spawnBarrel(); spawnT=spawnI; }
+  const MINGAP=Math.max(90, Math.round(actSpeed()*1.15)); // v0.9.4 (E-077): Reaktionslücke 1,0→1,15 s, Floor 90 px (Holger: "min Abstand noch ein wenig erhöhen")
+  // v0.8-bc (E-072, Holger): Wellen — 2 Fässer, später 3–4; immer ~eins pro Ebene aktiv; nie leer.
+  const HARDCAP=5;                    // Obergrenze gesamt auf dem Schirm
+  const waveSize=Math.min(4, 2+act);  // Akt 1: 2, Akt 2: 3, Akt 3: 4 Fässer pro Welle
+  // v0.9.4 (E-077, Holger): Zielgerade erst auf P4 — Ankunft ganz oben stoppt den Nachschub, Stapel wird geräumt (E-076).
+  // Der Sieg-Gang bleibt spannend: was schon rollt, rollt weiter. Banner erst, wenn der Schirm leer ist.
+  const halted = !P.dead && P.y+P.h <= PLATS[4].y+4 && P.x+P.w/2 >= GW/2; // v0.9.6 (E-079, Holger): Stopp erst ab der Mitte von P4 („wo BETA steht")
+  spawnHaltedNow = halted; // v0.9.2 (E-075): live fürs Rendering
+  // v0.9.8 (E-081, Holger): NICHTS Sichtbares wird ausgeblendet — schon gespawnte Fässer (stehend/rollend) leben aus.
+  // (E-076-Stapel-Räumung zurückgebaut: seit "Banner erst bei leerem Schirm" [E-077] lügt die Meldung nicht mehr.)
+  if(halted && barrels.length===0 && !spawnStopped){ spawnStopped=true; addFloat(GW/2,175,'FÄSSER GESTOPPT!'); } // v0.9.4: Banner erst bei leerem Schirm — im selben Moment verschwindet der Vorrat (E-075)
+  const topRowClear = !barrels.some(b => b.platIdx===4 && b.x > GW*0.45); // v0.9.8 (E-081, Holger): Welle 2 früher — P4 gilt als frei, sobald alle oben in der linken Hälfte sind (war: komplett leer)
+  if(!halted && pendingWave===0 && (barrels.length===0 || topRowClear) && barrels.length < HARDCAP){
+    pendingWave = waveSize;           // neue Welle vorbereiten
+  }
+  if(!halted && pendingWave>0 && barrels.length < HARDCAP){
+    // Welle Fass für Fass freigeben — aber nur wenn der Stapelplatz Mindestabstand frei ist
+    const stageBusy = barrels.some(b => b.platIdx===4 && Math.abs(b.x-(BARREL_STAGE.x-28)) < MINGAP);
+    if(!stageBusy){ spawnBarrel(); pendingWave--; }
+  }
 
   for(let i=barrels.length-1;i>=0;i--){
     const b=barrels[i];
     // Halte-Phase: Fass steht kurz am Stapelplatz
     if(b.holdT>0){
       b.holdT-=dt;
-      if(b.holdT<=0){ b.vx=-actSpeed(); } // jetzt losrollen
+      if(b.holdT<=0){ b.vx=-actSpeed()*BARREL_TYPES[b.type].spd; } // jetzt losrollen (v0.9/M2: Typ-Tempo)
       continue; // noch nicht physikupdaten
     }
     if(b.onGround){
       b.vy=0;
       const p=PLATS[b.platIdx];
-      b.y=p.y-b.h;
       b.x+=b.vx*dt;
+      // v0.9.1 (E-074, F-5c): Fass kippt mit 10% sichtbar durchs Loch (ab App 3) — einmal je Loch-Querung
+      const gnow=gapAt(b.platIdx, b.x+b.w/2);
+      if(gnow && b.lastGap!==gnow){
+        b.lastGap=gnow;
+        if(appsShipped>=2 && Math.random()<GAP_DROP_CHANCE){ b.onGround=false; b.vy=40; b.vx*=0.4; continue; }
+      } else if(!gnow){ b.lastGap=null; }
+      b.y=p.y-b.h; // Hüpfer ist rein visuell in drawBarrel (v0.9.6/E-079 — exakt wie Vibe v0.6.0)
       const offR=b.vx>0&&b.x+b.w>p.x+p.w+5;
       const offL=b.vx<0&&b.x<p.x-5;
       if(offR||offL){b.onGround=false;b.vy=15;b.vx=0;}
@@ -443,10 +540,11 @@ function updateBarrels(dt){
       if(b.vy>=0){
         for(let pi=0;pi<PLATS.length;pi++){
           const p=PLATS[pi];
+          if(gapAt(pi, b.x+b.w/2)) continue; // v0.9 (M1): Fässer landen nicht IN einer Lücke (hüpfen drüber)
           const prevB=b.y+b.h-b.vy*dt;
           if(prevB<=p.y+3&&b.y+b.h>=p.y&&b.x+b.w>p.x+4&&b.x<p.x+p.w-4){
             b.y=p.y-b.h;b.vy=0;b.onGround=true;b.platIdx=pi;
-            b.vx=PLATS[pi].dir*actSpeed();
+            b.vx=PLATS[pi].dir*actSpeed()*BARREL_TYPES[b.type].spd; // v0.9/M2: Typ-Tempo
             break;
           }
         }
@@ -473,6 +571,25 @@ function updateBarrels(dt){
     b.frameT+=dt;
     if(b.frameT>0.08){b.frame=(b.frame+1)%8;b.frameT=0;}
   }
+
+  // v0.6.2 (E-069, Holger): Mindestabstand auf derselben Plattform erzwingen — sonst überlagern sich Fässer
+  // (z. B. wenn eins von oben neben ein rollendes fällt) und werden unüberspringbar. Der in Rollrichtung
+  // hintere wird zurückgeklemmt, bis die Lücke wieder da ist. Garantiert F-1 (überspringbar) auch im Kaskaden-Fall.
+  // Kaskaden-Guard nutzt MINGAP von oben — Fässer gleicher Plattform ≥ MINGAP auseinander
+  for(let i=0;i<barrels.length;i++){
+    for(let j=i+1;j<barrels.length;j++){
+      const a=barrels[i], b=barrels[j];
+      if(a.platIdx!==b.platIdx || !a.onGround || !b.onGround || a.holdT>0 || b.holdT>0) continue;
+      if(Math.abs(a.x-b.x) >= MINGAP) continue;
+      const dir=PLATS[a.platIdx].dir;                 // Rollrichtung auf dieser Plattform
+      if(dir>0){ if(a.x<b.x) a.x=b.x-MINGAP; else b.x=a.x-MINGAP; }   // nach rechts: hinten = kleineres x
+      else     { if(a.x>b.x) a.x=b.x+MINGAP; else b.x=a.x+MINGAP; }   // nach links:  hinten = größeres x
+      // v0.9 (E-073/M1, F-4): nie in eine Loch-Zone klemmen — den Zurückgeklemmten hinter den Loch-Rand schieben
+      const back = dir>0 ? (a.x<b.x?a:b) : (a.x>b.x?a:b);
+      const bg2 = gapAt(back.platIdx, back.x+back.w/2);
+      if(bg2){ back.x = dir>0 ? bg2.x-back.w-2 : bg2.x+bg2.w+2; }
+    }
+  }
 }
 
 // --- RENDER ---
@@ -483,6 +600,12 @@ function render(){
   cx.strokeStyle=C.grid;cx.lineWidth=1;
   for(let x=0;x<GW;x+=20){cx.beginPath();cx.moveTo(x,0);cx.lineTo(x,GH);cx.stroke();}
   for(let y=0;y<GH;y+=20){cx.beginPath();cx.moveTo(0,y);cx.lineTo(GW,y);cx.stroke();}
+  // v0.9 (E-073/M5a): Ambient — Signal-Lichter im Himmel (A-3: der Schirm lebt immer, 0 Assets, R-046)
+  const TWK=[[30,70],[105,58],[168,84],[236,64],[352,46],[86,100],[300,48],[210,102]];
+  const tnow=Date.now()/500|0;
+  for(let ti=0;ti<TWK.length;ti++){
+    if((tnow+ti*5)%9<2){ cx.fillStyle='rgba(107,189,224,0.5)'; cx.fillRect(TWK[ti][0],TWK[ti][1],2,2); }
+  }
 
   // Leitern — tile-ladder (6x16) vertikal gekachelt, auf LW=18 gestreckt
   for(const l of LADDERS){
@@ -504,10 +627,10 @@ function render(){
   for(let pi=0;pi<PLATS.length;pi++){
     const p=PLATS[pi];
     if(pi===0 && SPRITES['tile-floor']){
-      // Boden (P0): floor-block (48x48) flächig unter der untersten Ebene
-      for(let fy=p.y; fy<GH; fy+=48)
-        for(let fx=0; fx<GW; fx+=48)
-          cx.drawImage(SPRITES['tile-floor'], fx, fy, 48, 48);
+      // v0.9.7 (E-080, Holger): Boden-Kisten kleiner (48→24), zwei Reihen bis y≈538 — die Steuer-Hinweis-Zeile (y552) bleibt frei lesbar
+      for(let fy=p.y; fy<p.y+48; fy+=24)
+        for(let fx=0; fx<GW; fx+=24)
+          cx.drawImage(SPRITES['tile-floor'], fx, fy, 24, 24);
     } else if(SPRITES['tile-platform']){
       // Gerüst-Balken (32x16) horizontal gekachelt, Oberkante ~p.y
       for(let gx=p.x; gx<p.x+p.w; gx+=32){
@@ -520,10 +643,25 @@ function render(){
       cx.fillStyle='rgba(0,0,0,0.18)';
       for(let gx=p.x+16;gx<p.x+p.w-6;gx+=18) cx.fillRect(gx,p.y,1,p.h);
     }
+    // v0.9 (E-073/M1): Loch-Aussparung + sichtbare Bruchkanten (Lena §6 — in 2s als Loch lesbar)
+    if(pi>=1&&pi<=3){
+      for(const g of GAPS){ if(g.plat!==pi) continue;
+        cx.fillStyle=C.bg; cx.fillRect(g.x, p.y-3, g.w, 16);
+        cx.fillStyle=C.yel; cx.fillRect(g.x-2, p.y-3, 2, 13); cx.fillRect(g.x+g.w, p.y-3, 2, 13);
+      }
+    }
     if(pi===4){
       cx.fillStyle=C.yel;cx.font='8px "Press Start 2P"';cx.textAlign='center';
       cx.fillText(ACT_GOAL[act],p.x+p.w/2,p.y-7);
     }
+  }
+
+  // v0.9.2 (E-075, Holger): Fass-Vorrat am Stapelplatz — „alle Fässer weg = Fass weg"
+  // (macht den Spawn-Stopp in der Welt lesbar: Vorrat verschwindet, der Weg zum Kollegen ist frei)
+  if(state!=='menu' && !spawnHaltedNow){ // v0.9.5 (E-078, Lena): Vorrat verschwindet bei P4-Ankunft — Quelle versiegt, Restfässer rollen aus
+    // v0.9.3 (E-076, Holger-Bug 2): Vorrat steht HINTER dem Kollegen (x352, war x272 mitten im Sieg-Weg)
+    if(SPRITES['barrel-stehend']) cx.drawImage(SPRITES['barrel-stehend'], 366, PLATS[4].y-28, 20, 28); // v0.9.9 (E-082): einen Ticken kleiner (24×33 → 20×28)
+    else { cx.fillStyle=C.blu; cx.fillRect(366, PLATS[4].y-22, 15, 22); }
   }
 
   // Fässer
@@ -622,9 +760,22 @@ function render(){
     cx.globalAlpha=1;
   }
 
+  // v0.5.2 (E-063, Holger): Steuer-Hinweis am unteren Rand — Sicherheitsnetz, falls die Startseite uebersprungen wurde
+  if(state==='play' && !isTouch){
+    cx.textAlign='center'; cx.font='6px "Press Start 2P"';
+    cx.fillStyle='rgba(0,0,0,0.55)'; cx.fillText('← →  LAUFEN    ↑  LEITER    SPACE  SPRINGEN', GW/2, 553);
+    cx.fillStyle='rgba(255,255,255,0.62)'; cx.fillText('← →  LAUFEN    ↑  LEITER    SPACE  SPRINGEN', GW/2, 552);
+  }
+
   if(state==='menu')    drawMenu();
   if(state==='over')    drawOver();
   if(state==='winanim') drawWin();
+
+  // v0.9.7 (E-080, Holger): Dev-Versionsanzeige — nur während der Entwicklung (DEV_BUILD=false vorm Kundentag)
+  if(DEV_BUILD){
+    cx.textAlign='left'; cx.font='6px "Press Start 2P"';
+    cx.fillStyle='rgba(255,255,255,0.45)'; cx.fillText(VERSION, 6, 78);
+  }
 }
 
 // --- Gorilla (E-029: Zappel + Push) ---
@@ -677,7 +828,20 @@ function drawBarrelStatic(type, dx, dy, dw, dh){
 
 // --- Barrel zeichnen — 8-Frame-Roll-Sheet (39x30), Badge eingebrannt ---
 function drawBarrel(b){
-  const bx=b.x|0, by=b.y|0;
+  // v0.9.6 (E-079): Hüpfer 1:1 aus der Vibe-Version (v0.6.0) — leichter Anstieg, dann Abstieg; rein visuell
+  let hop=0;
+  if(b.onGround){
+    const g=gapAt(b.platIdx, b.x+b.w/2);
+    if(g){ const gt=Math.max(0,Math.min(1,(b.x+b.w/2-g.x)/g.w)); hop=Math.sin(Math.PI*gt)*12; }
+  }
+  const bx=b.x|0, by=(b.y-hop)|0;
+  // v0.9 (E-073/M2, Lena §6): Tell für schnelle Fässer (spd>=1.3) — Speed-Lines hinter dem Fass
+  if(b.onGround && b.holdT<=0 && BARREL_TYPES[b.type].spd>=1.3){
+    const sldir=b.vx>0?-1:1;
+    cx.fillStyle='rgba(255,255,255,0.35)';
+    cx.fillRect(bx+(sldir<0?b.w+3:-9), by+5, 6, 2);
+    cx.fillRect(bx+(sldir<0?b.w+5:-11), by+13, 6, 2);
+  }
   // b.frame läuft bereits 0..7 (updateBarrels) → Sheet IST die Rollanimation, keine Rotation nötig.
   if(drawSheet('barrel-'+b.type+'-sheet', b.frame, 8, bx, by, b.w, b.h)) return;
   // Fallback (prozedural) — bleibt als Sicherheitsnetz
@@ -775,6 +939,39 @@ function drawBuildingShape(bx,by,stage,W,H,ghost){
                 cx.fillStyle=C.red;cx.fillRect(bx+W/2+1,by+2,6,4); }
 }
 
+// v0.5-bc (A1, E-061): App-Icon programmatisch (R-046 "Code wiederholt", 0 neue Assets)
+function drawAppIcon(x,y,sz,idx){
+  const hues=['#4a9fd4','#f5c400','#7ec850','#e06c9f','#e08a3c','#9b7ede'];
+  cx.fillStyle='rgba(0,0,0,0.55)'; cx.fillRect(x-1,y-1,sz+2,sz+2);      // dunkler Rand = Kontrast gegen den Himmel
+  cx.fillStyle=hues[idx%hues.length]; cx.fillRect(x,y,sz,sz);           // Kachel, Farb-Swap pro App
+  cx.fillStyle='rgba(255,255,255,0.9)'; cx.fillRect(x+1,y+1,sz-2,2);    // Titelbalken -> liest sich als App-Fenster
+  cx.fillStyle='rgba(255,255,255,0.45)'; cx.fillRect(x+1,y+sz-3,sz-3,1);
+  // v0.9 (E-073/M5a): Ambient — Fenster blinkt versetzt pro App (KONZEPT §5 A-3)
+  if(((Date.now()/400|0) + idx*3) % 7 < 2){ cx.fillStyle='rgba(255,255,200,0.9)'; cx.fillRect(x+2, y+4, 2, 2); }
+}
+// Skyline der ausgelieferten Apps — oben links im Himmel (ueber P4, weg vom Gorilla in der Mitte)
+function drawAppSkyline(){
+  const n=appsShipped;
+  cx.textAlign='left'; cx.font='6px "Press Start 2P"';
+  cx.fillStyle='rgba(0,0,0,0.6)'; cx.fillText('APPS '+n, 7, 49);        // Schatten
+  cx.fillStyle=C.yel; cx.fillText('APPS '+n, 6, 48);
+  const sz=9, gap=2, maxIcons=10, x0=54, yb=50;
+  const show=Math.min(n,maxIcons);
+  for(let i=0;i<show;i++){
+    const pulse=(i===show-1 && appDoneTimer>0) ? Math.round(3*Math.min(1,appDoneTimer)) : 0;
+    const s=sz+pulse;
+    drawAppIcon(x0+i*(sz+gap), yb-s, s, i);                             // unten buendig, neueste pulst kurz
+  }
+  if(n>maxIcons){ cx.fillStyle=C.wht; cx.font='6px "Press Start 2P"'; cx.textAlign='left';
+    cx.fillText('+'+(n-maxIcons), x0+show*(sz+gap)+2, 49); }
+  if(appDoneTimer>0){                                                   // kurzer "APP FERTIG!"-Moment, neben der Skyline
+    cx.globalAlpha=Math.min(1,appDoneTimer);
+    cx.fillStyle=C.yel; cx.font='7px "Press Start 2P"'; cx.textAlign='left';
+    cx.fillText('APP FERTIG!', 6, 66);
+    cx.globalAlpha=1;
+  }
+}
+
 // --- HUD --- (min. 8px Font für Press Start 2P Schärfe)
 function drawHUD(){
   cx.fillStyle='rgba(0,0,0,0.75)'; cx.fillRect(0,0,GW,38);
@@ -803,6 +1000,8 @@ function drawHUD(){
   cx.textAlign='right';
   cx.fillStyle=C.yel;cx.font='8px "Press Start 2P"'; cx.fillText('BEST',GW-42,13);
   cx.fillStyle=C.wht;cx.font='9px "Press Start 2P"'; cx.fillText(String(HS).padStart(6,'0'),GW-42,27);
+
+  drawAppSkyline(); // v0.5-bc (A1): ausgelieferte Apps oben links
 }
 
 // --- Menü ---
@@ -855,7 +1054,7 @@ function drawMenu(){
   { const aw=26,ah=23,ag=8,at=5*(aw+ag)-ag,axs=GW/2-at/2;
     for(let st=1;st<=5;st++) drawBuildingShape(axs+(st-1)*(aw+ag),424,st,aw,ah,false); }
   cx.fillStyle='rgba(255,255,255,0.2)';cx.font='5px "Press Start 2P"';
-  cx.fillText('PROTO v0.4.4-bc',GW/2,540);
+  cx.fillText('PROTO '+VERSION,GW/2,540);
 }
 
 // --- Game Over ---
@@ -982,6 +1181,7 @@ function loop(ts){
     for(const f of floaters){f.life-=dt;f.y-=38*dt;}
     floaters=floaters.filter(f=>f.life>0);
     if(buildTutTimer>0) buildTutTimer-=dt;
+    if(appDoneTimer>0) appDoneTimer-=dt; // v0.5-bc (A1): "APP FERTIG"-Moment ausblenden
   }
   if(state==='winanim'){
     winAnim-=dt;
