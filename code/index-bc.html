@@ -99,6 +99,11 @@ const SPRITE_FILES = [
   ['barrel-roll-sheet',        '../sprites/final/barrel-roll-sheet.png'],
   // Stehendes Fass am Stapelplatz (UI, bleibt blau), 41x56
   ['barrel-stehend',  '../sprites/final/barrel-stand.png'],
+  ['barrel-bug-menu',         '../sprites/final/barrel-bug-menu.png'],         // Dialog-Fass liegend (Holger 2026-07-05, test)
+  ['barrel-config-menu',      '../sprites/final/barrel-config-menu.png'],
+  ['barrel-anforderung-menu', '../sprites/final/barrel-anforderung-menu.png'],
+  ['barrel-entwicklung-menu', '../sprites/final/barrel-entwicklung-menu.png'],
+  ['barrel-schulung-menu',    '../sprites/final/barrel-schulung-menu.png'],
   // Environment-Tiles
   ['tile-platform', '../sprites/final/platform-beam.png'], // 32x16, horizontal kacheln
   ['tile-ladder',   '../sprites/final/ladder.png'],        // 18x16, vertikal kacheln
@@ -235,9 +240,11 @@ const BSPAWN = {x:358, y:104}; // über P4 (y=130-28+2=104)
 // Skalierung app-basiert (NICHT level-basiert wie im Vibe-Stand): App 1 lochfrei (F-3).
 const GAPS=[];
 const GAP_WMAX=60;   // harter Deckel (F-5), tunebar 36–60 (Holger: "ein Ticken kleiner")
-const GAP_DROP_CHANCE=0.10; // v0.9.1 (E-074, Holger): Fass kippt mit 10% durchs Loch — erst ab App 3 (F-5c)
-function gapCount(){ return Math.min(appsShipped, 6); } // v0.9.1 (E-074, Holger): +1 Loch pro App — App2: 1, App3: 2 … Deckel 6
-function gapBaseW(){ return Math.min(56, 40+4*appsShipped); }                    // v0.9.1: flacher — 44 → 48 → 52 → 56 (±4 Jitter)
+const GAP_DROP_CHANCE=0.10; // Konzept-Wert: 10% ab App 3 (v0.9.1/E-074, Holger: F-5c)
+const GAP_TEST_MODE=false;  // v0.11.16: Test-Phase beendet (Holger: STANDARD soll echte Rampe zeigen — App 1 lochfrei). Der Vorfuehr-Modus (App-Sprung) ersetzt den Test-Modus. Bei Bedarf wieder auf true: Chance s. GAP_TEST_CHANCE, keine App-3-Schwelle, min. 2 Loecher ab App 1.
+const GAP_TEST_CHANCE=0.5;  // TEST: Durchfall-Chance im Test-Modus (Holger: 1.0 zum Durchfall-Check, 0.5 fuer den Misch-Lauf Huepfen/Fallen)
+function gapCount(n=appsShipped){ const c=Math.min(n, 6); return GAP_TEST_MODE ? Math.max(2,c) : c; } // v0.9.1 (E-074, Holger): +1 Loch pro App — App2: 1, App3: 2 … Deckel 6; TEST-Modus: min. 2 Loecher schon ab App 1; Param n fuer Vorfuehr-Tafel (v0.11.13)
+function gapBaseW(n=appsShipped){ return Math.min(56, 40+4*n); }                 // v0.9.1: flacher — 44 → 48 → 52 → 56 (±4 Jitter); Param n fuer Vorfuehr-Tafel
 function generateGaps(){
   GAPS.length=0;
   const total=gapCount();
@@ -292,7 +299,7 @@ const P={
 };
 
 // --- Game state ---
-const VERSION='v0.11.6-bc'; // v0.11.6 (E-104/E-105, Claude-Code-Lauf): Verstaendlichkeits-Welle — Wellen-Takt (F1), Original-Fass-Sprite+Buchstabe kleiner/tiefer im Popup (F2/T1), Wurf-Fass-Sprite unangetastet (F3/T2), FEATURES-Zaehler erledigt/gesamt (F4) (davor v0.11.5 E-100/E-102)
+const VERSION='v0.11.17-bc'; // v0.11.17: E-107 Fass-Spawn-Facing-Fix (_face beim Spawn latchen) + Fass-Optik-Runde 2026-07-05 (Groesse 25x19, Buchstaben aus, Steh-Fass gestapelt, Menue-Faesser) (davor v0.11.16: GAP_TEST_MODE aus, Vorfuehr-Modus)
 const DEV_BUILD=true;      // Holger: Versionsanzeige im Spiel — vor dem Kundentag auf false stellen
 let barrels=[], state='menu';
 let score=0, scoreAcc=0, level=1, lives=3;
@@ -361,6 +368,14 @@ function toggleSound(){
   if(soundOn){ ensureAC(); sfx('start'); } // User-Geste = Audio-Unlock (iOS/Chrome-Policy)
 }
 const SND_BOX={x:GW-26,y:44,w:22,h:22}; // rechts unterm HUD (kollisionsfrei: Gorilla endet ~x371 ab y~57, Button endet y=66 bei x>=374)
+
+// --- v0.11.13 (Vorfuehr-Modus, Holger/Ravi): DEV-only — Rampen-Tafel + App-Sprung (frischer Run) ---
+// Zweck: Testen + Abstimmung mit dem Kunden (alle Schwierigkeits-Stufen auf einer Seite sehen & anspielen).
+// Nur sichtbar/aktiv bei DEV_BUILD=true — verschwindet beim Freeze automatisch mit, kein eigener Schalter.
+let demoOpen=false;                    // Tafel offen (Welt haelt an, wie beim Tutorial-Popup)
+let demoRun=false;                     // laufender Run kam aus dem Demo-Sprung → keine Rekord-Schreibungen
+const DEMO_BOX={x:6,y:84,w:46,h:14};   // Button unter der Dev-Versionsanzeige (links oben)
+const DEMO_ROWS=[];                    // Hitboxen der Tafel-Zeilen (wird beim Zeichnen befuellt)
 function drawSndBtn(){
   const b=SND_BOX;
   cx.fillStyle='rgba(6,6,24,0.7)'; cx.fillRect(b.x,b.y,b.w,b.h);
@@ -381,7 +396,7 @@ let shake=0; // v0.10 (E-067): kurzer Screen-Shake beim Treffer — Juice, kein 
 
 // v0.10.3 (E-088, Lena): Fass-Typ-Letter zur LAUFZEIT gezeichnet statt ins Sprite gebrannt —
 // scharf in Bildschirmauflösung (8px = E-050-Floor), schaltbar per Taste B. Sheets tragen nur noch die Farbscheibe.
-let barrelLetters=true;
+let barrelLetters=false; // Fass-Test 2026-07-05: Buchstaben aus (graues Fass, kein Typ) — revertierbar auf true
 function drawBarrelLetter(b,bx,by){
   if(!barrelLetters || b.holdT>0) return;
   const ch=b.type[0].toUpperCase(); // B/C/A/E/S — Farbe bleibt das Primärsignal (Doppelsignal-Regel #035)
@@ -401,11 +416,12 @@ const KONG_THROW_DUR=0.8;    // Wurfdauer (langsam), #Gorilla-RD
 // --- Hilfsfunktionen ---
 function addFloat(x,y,text){floaters.push({x,y,text,life:1.2});}
 
-function actSpeed() {
+function actSpeed(n=appsShipped) {
   // v0.9.2 (E-075, Holger): Tempo hängt NUR an der App — innerhalb einer App konstant („Speed halten").
   // Rampe ~×1,15 pro App, Deckel App 5 (Max-Punkt E-074). Ersetzt Akt-Rampe (E-024) + Cycle-Multiplikator.
+  // v0.11.13: optionaler Parameter n — die Vorführ-Tafel rechnet damit fremde Apps aus DERSELBEN Formel (kein Duplikat).
   const APP_SPEED=[80, 92, 106, 122, 140];
-  return APP_SPEED[Math.min(appsShipped, APP_SPEED.length-1)];
+  return APP_SPEED[Math.min(n, APP_SPEED.length-1)];
 }
 function actSpawnI() {
   const base=[2.8,2.0,1.4][act];
@@ -428,6 +444,7 @@ function initGame(){
   score=0; scoreAcc=0; hitFlash=0; winAnim=0; floaters=[];
   spawnFreeze=1.5; spawnT=1.5; spawnI=actSpawnI();
   moveStarted=false; lastSpawn=null; pendingWave=0; wavePauseT=0; spawnStopped=false; // v0.8 (E-072): Zyklus/Welle frisch
+  demoRun=false; // v0.11.13: normaler Start = kein Demo-Run (startDemoRun setzt es danach wieder)
   generateGaps(); // v0.9 (E-073/M1): frische Löcher pro Run (App 1 lochfrei)
   buildTutTimer=0; // v0.4.1 (CC#8): Tutorial-Popup nicht in frischen Run schleppen
   if(!buildTutShown){ buildTutTimer=7.0; buildTutShown=true; spawnFreeze=Math.max(spawnFreeze,buildTutTimer); } // v0.11.1: 4,0→7,0 s lesbar + per Tipp schließbar; Spawns solange einfrieren
@@ -455,9 +472,22 @@ function nextAct(){
   generateGaps(); // v0.9 (E-073/M1): Löcher pro Akt neu würfeln (Anzahl/Breite per App-Staffel)
   hitFlash=0; winAnim=0; state='play';
 }
+// v0.11.13 (Vorfuehr-Modus): frischer Run direkt in App n (1-basiert) — bewusst ueber den normalen
+// Reset-Pfad (initGame) + appsShipped-Vorgabe, KEINE Hand-Mutation einzelner Variablen im Lauf.
+// Tempo/Welle/Typen/Durchfall haengen alle live an appsShipped und ziehen automatisch mit.
+function startDemoRun(n){
+  level=1; lives=3;
+  initGame();                    // setzt u.a. demoRun=false zurueck …
+  appsShipped=n-1; featsIntoApp=0;
+  act=2;                         // v0.11.14 (Holger): Sprung direkt in den LIVE-Akt — sonst rollen im PROTOTYP nur BUG/CFG
+                                 // und die schnellen Faesser (DEV ab App 3, SCH ab App 4) waeren erst nach 1-2 Aufstiegen sichtbar
+  generateGaps();                // initGame wuerfelte fuer App 1 — mit der Ziel-App neu (Anzahl/Breite per Rampe)
+  demoRun=true; demoOpen=false;  // … deshalb demoRun ERST NACH initGame setzen
+  sfx('start');
+}
 
 // Stehend-Fass-Position (links vor Gorilla, auf P4)
-const BARREL_STAGE = {x:272, y:PLATS[4].y-20}; // sitzt auf P4 (Fass-Höhe 20 seit E-081)
+const BARREL_STAGE = {x:272, y:PLATS[4].y-19}; // sitzt auf P4 (Fass-Höhe 19, Fass-Test 2026-07-05; war 20 seit E-081)
 const WIN_BOX = {x:306, w:40}; // v0.9 (E-073/M3): MAN-Box des Gorillaman (kx=304) — Berührung gewinnt
 
 // --- Barrel spawnen — kurze Pause am Stapelplatz ---
@@ -465,12 +495,13 @@ function spawnBarrel(){
   const type=randomBarrelType(act);
   barrels.push({
     x:BARREL_STAGE.x-28, y:BARREL_STAGE.y, // F-3: vor dem Stehfass erscheinen (links davor), dann rollen
-    w:26, h:20, // v0.9.8 (E-081, Lena): einen Ticken kleiner (30×23 → 26×20) — Proportion zur 22-px-Figur, Verhältnis 1,3 bleibt
+    w:25, h:19, // Fass-Test 2026-07-05 (Holger): kleiner (25×19); y-Anker Z.485 mitgezogen
     vx:0, vy:0,
     onGround:true, platIdx:4,
     frame:0, frameT:0,
-    type, jumpScored:false,
+    type, jumpScored:false, gapFall:false,
     holdT:0.45, // Sekunden stehen bleiben bevor Rollen
+    _face:true, // Spawn-Fix 2026-07-06: Fass rollt nach dem Stehen immer nach links (Z.638, vx<0) -> _face vorab auf die Roll-Richtung latchen, sonst zeigt es waehrend holdT unges­piegelt (= verkehrt) und dreht sich erst beim Losrollen sichtbar um
   });
   kongThrowType=type;          // Gorilla wirft ein Fass in dieser Typ-Farbe
   kongThrowT=KONG_THROW_DUR;
@@ -484,9 +515,11 @@ function updatePlayer(dt){
       lives--;
       if(lives<=0){
         state='over'; sfx('over');
+        if(!demoRun){ // v0.11.13: Demo-Sprung-Laeufe schreiben keinen Rekord (Start in App 5 wuerde HS/HS_APPS verfaelschen)
         if(score>HS){ HS=score; try{localStorage.setItem('shb_bc_hs',HS);}catch(e){} }
         if(buildLoops>HS_LOOPS){ HS_LOOPS=buildLoops; try{localStorage.setItem('shb_bc_loops',HS_LOOPS);}catch(e){} }
         if(appsShipped>HS_APPS){ HS_APPS=appsShipped; try{localStorage.setItem('shb_bc_apps',HS_APPS);}catch(e){} } // v0.5-bc (A1)
+        }
       } else {
         resetPlayer(); barrels=[]; spawnFreeze=2; spawnT=2; hitFlash=0; spawnStopped=false; // M3: Zielgerade neu verdienen
       }
@@ -615,12 +648,34 @@ function updateBarrels(dt){
       const gnow=gapAt(b.platIdx, b.x+b.w/2);
       if(gnow && b.lastGap!==gnow){
         b.lastGap=gnow;
-        if(appsShipped>=2 && Math.random()<GAP_DROP_CHANCE){ b.onGround=false; b.vy=40; b.vx*=0.4; continue; }
+        if((GAP_TEST_MODE||appsShipped>=2) && Math.random()<(GAP_TEST_MODE?GAP_TEST_CHANCE:GAP_DROP_CHANCE)){ b.onGround=false; b.vy=40; b.gapFall=true; continue; } // Durchfall E-074 (ab App 3, 10%); TEST-Modus s. GAP_TEST_MODE — siehe gapFall-Zweig unten
       } else if(!gnow){ b.lastGap=null; }
       b.y=p.y-b.h; // Hüpfer ist rein visuell in drawBarrel (v0.9.6/E-079 — exakt wie Vibe v0.6.0)
       const offR=b.vx>0&&b.x+b.w>p.x+p.w+5;
       const offL=b.vx<0&&b.x<p.x-5;
       if(offR||offL){b.onGround=false;b.vy=15;b.vx=0;}
+    } else if(b.gapFall){
+      // v0.11.9 (Holger, Root-Cause der Original-Meldung "springt zurueck"): Loch-Durchfall
+      // (E-074/H3b) landet eine Ebene tiefer (pi<platIdx, Durchquerungs-Check, gapAt-Skip = F-5c) —
+      // und BEHAELT dabei Richtung + Tempo (b.vx bleibt unangetastet). Die alte Zuweisung
+      // b.vx = PLATS[pi].dir * ... drehte das Fass beim Landen ZWANGSLAEUFIG um (dir alterniert
+      // pro Ebene) → es rollte unter der Luecke zurueck = die gemeldete Optik, kein Physik-Glitch.
+      // Rollt es unten gegen den Plattform-Strom, faellt es an der Kante normal ab und die
+      // uebernaechste Ebene hat wieder SEINE Richtung — der Fluss bleibt nahtlos ("einfach
+      // weiterrollen", Abkuerzung nach unten). Historie: v0.11.7 (Landen nur auf Ursprungs-
+      // Plattform, ohne Durchquerungs-Check) war eine Fehldeutung → Zucken statt Durchfall.
+      b.vy+=900*dt; b.x+=b.vx*dt; b.y+=b.vy*dt;
+      if(b.vy>=0){
+        for(let pi=0;pi<b.platIdx;pi++){
+          const p=PLATS[pi];
+          if(gapAt(pi, b.x+b.w/2)) continue; // F-5c: nie in einer Luecke landen — dann eine Ebene weiter fallen
+          const prevB=b.y+b.h-b.vy*dt;
+          if(prevB<=p.y+3&&b.y+b.h>=p.y&&b.x+b.w>p.x+4&&b.x<p.x+p.w-4){
+            b.y=p.y-b.h;b.vy=0;b.onGround=true;b.platIdx=pi;b.gapFall=false;b.lastGap=null;
+            break; // b.vx bleibt: gleiche Richtung, gleiches Tempo (kein PLATS[pi].dir!)
+          }
+        }
+      }
     } else {
       b.vy+=900*dt; b.x+=b.vx*dt; b.y+=b.vy*dt;
       if(b.vy>=0){
@@ -666,14 +721,33 @@ function updateBarrels(dt){
     for(let j=i+1;j<barrels.length;j++){
       const a=barrels[i], b=barrels[j];
       if(a.platIdx!==b.platIdx || !a.onGround || !b.onGround || a.holdT>0 || b.holdT>0) continue;
+      if((a.vx>0)!==(b.vx>0)) continue; // v0.11.9: Gegenstrom-Fass (Loch-Durchfall behaelt Richtung) — Begegnungs-Paare nicht klemmen, sonst schiebt eins das andere rueckwaerts ("springt zurueck"-Optik); kurzes Kreuzen ist ok
       if(Math.abs(a.x-b.x) >= MINGAP) continue;
-      const dir=PLATS[a.platIdx].dir;                 // Rollrichtung auf dieser Plattform
-      if(dir>0){ if(a.x<b.x) a.x=b.x-MINGAP; else b.x=a.x-MINGAP; }   // nach rechts: hinten = kleineres x
-      else     { if(a.x>b.x) a.x=b.x+MINGAP; else b.x=a.x+MINGAP; }   // nach links:  hinten = größeres x
-      // v0.9 (E-073/M1, F-4): nie in eine Loch-Zone klemmen — den Zurückgeklemmten hinter den Loch-Rand schieben
+      const dir=a.vx>0?1:-1;                          // Rollrichtung des Paars (nach Durchfall ggf. != PLATS.dir; Vorzeichen oben als gleich geprueft)
+      // v0.11.11 (Ravi — ersetzt den F-4-Push komplett; ROOT-CAUSE "Fass springt am Loch zurueck"):
+      // (1) Beruehrt der Hintere eine Loch-Zone (IRGENDEIN Teil des Fasses, nicht nur der Mittel-
+      //     punkt), wird das Paar NICHT geklemmt — er quert frei. Ueber einem Loch kann der Spieler
+      //     nie stehen (er faellt durch, E-073/M1), also ist die Sprung-Fairness (F-1) dort gegen-
+      //     standslos; F-4 ("nie in eine Loch-Zone klemmen") ist erfuellt, weil dort gar nicht mehr
+      //     geklemmt wird. Vorher: Push teleportierte ~15px hinter den Rand (Holgers "halbe Fass-
+      //     laenge drueber, dann Ruecksprung"); das v0.11.10-Kanten-Parken stallte/ruckelte ebenso.
+      // (2) Klemm-Korrektur weich: max 360 px/s statt Sofort-Setzen — Abstands-Verletzungen (z.B.
+      //     Landung von oben) loesen sich in ~0,25s auf, ohne sichtbaren Sprung. Im Dauer-Verfolgungs-
+      //     fall (Tempo-Differenz ~1-2 px/Frame) greift der Deckel nie → Verhalten wie bisher.
       const back = dir>0 ? (a.x<b.x?a:b) : (a.x>b.x?a:b);
-      const bg2 = gapAt(back.platIdx, back.x+back.w/2);
-      if(bg2){ back.x = dir>0 ? bg2.x-back.w-2 : bg2.x+bg2.w+2; }
+      let nearGap=false;
+      for(const g of GAPS){ if(g.plat===back.platIdx && back.x<g.x+g.w && back.x+back.w>g.x){ nearGap=true; break; } }
+      if(nearGap) continue;
+      const corr=Math.min(360*dt, MINGAP-Math.abs(a.x-b.x));
+      if(dir>0){ if(a.x<b.x) a.x-=corr; else b.x-=corr; }   // nach rechts: hinten = kleineres x
+      else     { if(a.x>b.x) a.x+=corr; else b.x+=corr; }   // nach links:  hinten = größeres x
+      // v0.11.12 (Ravi, Holger-Fund P0 rechts): nie ueber die Plattform-Kante hinausklemmen —
+      // zwei Linksroller nahe der rechten Kante schoben den Hinteren sonst offscreen (bzw. ab
+      // +80px in die Aufraeum-Loeschung). Fass bleibt an der Kante stehen, bis der Vordermann
+      // Platz macht; der Abstand stellt sich dann von selbst wieder her.
+      const pB=PLATS[back.platIdx];
+      if(back.x < pB.x) back.x = pB.x;
+      else if(back.x > pB.x+pB.w-back.w) back.x = pB.x+pB.w-back.w;
     }
   }
 }
@@ -791,7 +865,10 @@ function render(){
   // (macht den Spawn-Stopp in der Welt lesbar: Vorrat verschwindet, der Weg zum Kollegen ist frei)
   if(state!=='menu' && !spawnHaltedNow){ // v0.9.5 (E-078, Lena): Vorrat verschwindet bei P4-Ankunft — Quelle versiegt, Restfässer rollen aus
     // v0.9.3 (E-076, Holger-Bug 2): Vorrat steht HINTER dem Kollegen (x352, war x272 mitten im Sieg-Weg)
-    if(SPRITES['barrel-stehend']) cx.drawImage(SPRITES['barrel-stehend'], 366, PLATS[4].y-28, 20, 28); // v0.9.9 (E-082): einen Ticken kleiner (24×33 → 20×28)
+    if(SPRITES['barrel-stehend']){ const bw=15,bh=20,sx=366,yo=6; // kleiner + 2 gestapelt + yo: tiefer auf den Balken (steht auf dem Boden statt dahinter) — Holger 2026-07-05
+      cx.drawImage(SPRITES['barrel-stehend'], sx,   PLATS[4].y-bh+yo,        bw, bh); // unteres
+      cx.drawImage(SPRITES['barrel-stehend'], sx+1, PLATS[4].y-bh-(bh-3)+yo, bw, bh); // oberes (sitzt auf dem unteren)
+    }
     else { cx.fillStyle=C.blu; cx.fillRect(366, PLATS[4].y-22, 15, 22); }
   }
 
@@ -910,7 +987,60 @@ function render(){
   if(DEV_BUILD){
     cx.textAlign='left'; cx.font='6px "Press Start 2P"';
     cx.fillStyle='rgba(255,255,255,0.45)'; cx.fillText(VERSION, 6, 78);
+    // v0.11.13: Vorfuehr-Modus-Button (nur DEV, verschwindet mit DEV_BUILD=false)
+    const d=DEMO_BOX;
+    cx.fillStyle=demoOpen?'rgba(74,159,212,0.85)':'rgba(13,13,46,0.8)'; cx.fillRect(d.x,d.y,d.w,d.h);
+    cx.strokeStyle='rgba(255,255,255,0.5)'; cx.lineWidth=1; cx.strokeRect(d.x+0.5,d.y+0.5,d.w-1,d.h-1);
+    cx.textAlign='center'; cx.font='6px "Press Start 2P"'; cx.fillStyle=C.wht;
+    cx.fillText('DEMO', d.x+d.w/2, d.y+10);
+    if(demoOpen) drawDemoPanel();
   }
+}
+
+// --- v0.11.13 (Vorfuehr-Modus, Holger/Ravi): Rampen-Tafel — LIVE aus den Spiel-Formeln gerechnet ---
+// (actSpeed/gapCount/gapBaseW mit App-Parameter = dieselben Funktionen wie das Spiel; nichts abgetippt,
+// die Tafel kann nicht driften, wenn getunt wird. Welle = Formel aus updateBarrels, dort lokal.)
+function drawDemoPanel(){
+  DEMO_ROWS.length=0;
+  cx.fillStyle='rgba(6,6,24,0.94)'; cx.fillRect(12,70,GW-24,300);
+  cx.strokeStyle=C.blu; cx.lineWidth=2; cx.strokeRect(12,70,GW-24,300);
+  cx.textAlign='center'; cx.fillStyle=C.yel; cx.font='10px "Press Start 2P"';
+  cx.fillText('VORFÜHR-MODUS', GW/2, 92);
+  cx.font='6px "Press Start 2P"'; cx.fillStyle=C.wht;
+  cx.fillText('ZEILE ANTIPPEN = NEUSTART IN DER APP (LIVE-AKT)', GW/2, 106);
+  const col={app:32, tempo:86, loch:152, typ:230, welle:322, fall:362};
+  cx.fillStyle='rgba(255,255,255,0.55)';
+  cx.fillText('APP',col.app,124); cx.fillText('TEMPO',col.tempo,124); cx.fillText('LÖCHER',col.loch,124);
+  cx.fillText('FÄSSER',col.typ,124); cx.fillText('WELLE',col.welle,124); cx.fillText('FALL',col.fall,124);
+  for(let n=0;n<6;n++){
+    const y=136+n*28;
+    DEMO_ROWS.push({n:n+1, x:16, y:y-4, w:GW-32, h:26});
+    if(n===Math.min(appsShipped,5) && state!=='menu'){ cx.fillStyle='rgba(74,159,212,0.18)'; cx.fillRect(16,y-4,GW-32,26); } // aktuelle App markieren
+    cx.strokeStyle='rgba(255,255,255,0.12)'; cx.lineWidth=1; cx.beginPath(); cx.moveTo(16,y+22); cx.lineTo(GW-16,y+22); cx.stroke();
+    cx.font='8px "Press Start 2P"'; cx.fillStyle=C.yel; cx.textAlign='center';
+    cx.fillText(String(n+1), col.app, y+13);
+    cx.font='6px "Press Start 2P"'; cx.fillStyle=C.wht;
+    cx.fillText(actSpeed(n)+' PX/S', col.tempo, y+13);
+    const gc=gapCount(n);
+    cx.fillText(gc===0?'—':gc+' × '+gapBaseW(n)+'PX', col.loch, y+13);
+    const tl = n<APP_TYPES.length ? APP_TYPES[n] : Object.keys(BARREL_TYPES); // ab App 4: alle Typen
+    let tx=col.typ-(tl.length-1)*7;
+    for(const k of tl){ cx.fillStyle=BARREL_TYPES[k].color; cx.fillText(BARREL_TYPES[k].label[0], tx, y+13); tx+=14; }
+    cx.fillStyle=C.wht;
+    cx.fillText(String(Math.min(5,3+n)), col.welle, y+13);                    // = waveSize-Formel (updateBarrels)
+    const dc=GAP_TEST_MODE ? GAP_TEST_CHANCE : (n>=2 ? GAP_DROP_CHANCE : 0);  // = Durchfall-Bedingung (updateBarrels)
+    cx.fillText(gc>0&&dc>0 ? Math.round(dc*100)+'%' : '—', col.fall, y+13);
+  }
+  // v0.11.15 (Holger): STANDARD — normaler Start wie uebers Menue (App 1, PROTOTYP, Rekorde zaehlen)
+  DEMO_ROWS.push({n:0, x:GW/2-92, y:302, w:184, h:18});
+  cx.fillStyle='rgba(13,13,46,0.9)'; cx.fillRect(GW/2-92,302,184,18);
+  cx.strokeStyle='rgba(255,255,255,0.5)'; cx.lineWidth=1; cx.strokeRect(GW/2-91.5,302.5,183,17);
+  cx.font='6px "Press Start 2P"'; cx.fillStyle=C.yel; cx.textAlign='center';
+  cx.fillText('STANDARD: NORMALER START', GW/2, 314);
+  if(GAP_TEST_MODE){ cx.fillStyle=C.yel; cx.fillText('TEST-MODUS AKTIV — LÖCHER/FALL ÜBERSTEUERT (GAP_TEST_MODE)', GW/2, 334); }
+  cx.fillStyle='rgba(255,255,255,0.55)';
+  cx.fillText('AB APP 6: +1 LOCH JE APP (MAX 6), REST BLEIBT', GW/2, 347);
+  cx.fillText('TASTE D ODER TIPP AUSSERHALB = SCHLIESSEN', GW/2, 359);
 }
 
 // --- Gorilla (E-029: Zappel + Push) ---
@@ -963,7 +1093,9 @@ function drawSheet(key, frame, frames, dx, dy, dw, dh){
 // Buchstabe zentriert mitskaliert oben drauf (E-088-Overlay-Logik).
 function drawBarrelBig(type, dx, dy, dw, dh){
   const t=BARREL_TYPES[type];
-  if(!drawSheet('barrel-'+type+'-sheet', 0, 8, dx, dy, dw, dh)){
+  const mimg=SPRITES['barrel-'+type+'-menu']; // Dialog-Fass = liegende Version (Holger 2026-07-05, test); seitenverhaeltnis-treu, kein Dehnen
+  if(mimg){ const ar=mimg.width/mimg.height; let w=dw,h=Math.round(dw/ar); if(h>dh){h=dh;w=Math.round(dh*ar);} cx.drawImage(mimg, dx+((dw-w)>>1), dy+((dh-h)>>1), w, h); }
+  else if(!drawSheet('barrel-'+type+'-sheet', 0, 8, dx, dy, dw, dh)){
     cx.fillStyle=t.color; cx.fillRect(dx,dy,dw,dh); // Fallback falls Sheet fehlt
   }
   if(barrelLetters){
@@ -992,7 +1124,11 @@ function drawBarrel(b){
     cx.fillRect(bx+(sldir<0?b.w+5:-11), by+13, 6, 2);
   }
   // b.frame läuft bereits 0..7 (updateBarrels) → Sheet IST die Rollanimation, keine Rotation nötig.
-  if(drawSheet('barrel-'+b.type+'-sheet', b.frame, 8, bx, by, b.w, b.h)){ drawBarrelLetter(b,bx,by); return; } // E-088
+  // Fass-Test 2026-07-05: 3/4-Rollfass ist richtungsabhaengig -> nach Fahrtrichtung spiegeln (Weg A, revertierbar)
+  { if(Math.abs(b.vx)>12) b._face=b.vx<0; const flip=b._face===true, yoff=(b.platIdx===0?3:6); cx.save(); if(flip){ cx.translate(bx+b.w,0); cx.scale(-1,1); } // _face latcht Richtung (kein L/R-Flackern); yoff: Boden 3, Traeger 6 (Balken sitzt tiefer im Tile) — Holger 2026-07-05
+    const drawn=drawSheet('barrel-'+b.type+'-sheet', b.frame, 8, flip?0:bx, by+yoff, b.w, b.h);
+    cx.restore();
+    if(drawn){ drawBarrelLetter(b,bx,by); return; } } // E-088
   // Fallback (prozedural) — bleibt als Sicherheitsnetz
   const t=BARREL_TYPES[b.type];
   const r=b.w/2;
@@ -1297,7 +1433,7 @@ let lastT=0;
 function loop(ts){
   const dt=Math.min((ts-lastT)/1000,0.05); lastT=ts;
   if(state==='play'){
-    if(buildTutTimer>0){ // v0.11.3 (CC-Review #1): Popup hält die WELT an — kein Spawn, keine Kollision, kein Tod hinterm Overlay
+    if(buildTutTimer>0 || demoOpen){ // v0.11.3 (CC-Review #1): Popup hält die WELT an — kein Spawn, keine Kollision, kein Tod hinterm Overlay; v0.11.13: Vorfuehr-Tafel ebenso
       if(!DEV_BUILD) buildTutTimer-=dt;
     } else {
     updatePlayer(dt);
@@ -1328,6 +1464,8 @@ function startOrRestart(){
 window.addEventListener('keydown',e=>{
   if(e.code==='KeyM'){ toggleSound(); return; } // v0.10 (E-067): Mute-Toggle Desktop
   if(e.code==='KeyB'){ barrelLetters=!barrelLetters; return; } // v0.10.3 (E-088): Fass-Letter an/aus
+  if(DEV_BUILD&&e.code==='KeyD'){ demoOpen=!demoOpen; return; } // v0.11.13: Vorfuehr-Modus auf/zu (Desktop)
+  if(demoOpen){ if(e.code==='Escape') demoOpen=false; return; } // v0.11.13: Tafel offen → Tasten schlucken (kein verstecktes Start/Restart)
   if(state==='play'&&buildTutTimer>0&&(e.code==='Space'||e.code==='Enter')){ buildTutTimer=0; spawnFreeze=Math.min(spawnFreeze,0.8); return; } // v0.11.1: Popup auch per Taste schließbar
   if(state==='winanim'&&DEV_BUILD&&(e.code==='Space'||e.code==='Enter')){ nextAct(); return; } // v0.11.2: DEV — Win-Screen per Taste weiter
   if(e.code==='Space'||e.code==='Enter') startOrRestart();
@@ -1336,12 +1474,24 @@ cv.addEventListener('pointerdown',e=>{ // v0.10 (E-067): erst Sound-Button-Hit-T
   const r=cv.getBoundingClientRect();
   const gx=(e.clientX-r.left)/r.width*GW, gy=(e.clientY-r.top)/r.height*GH;
   if(gx>=SND_BOX.x-8&&gx<=SND_BOX.x+SND_BOX.w+8&&gy>=SND_BOX.y-8&&gy<=SND_BOX.y+SND_BOX.h+8){ toggleSound(); return; }
+  // v0.11.13 (Vorfuehr-Modus, nur DEV): erst Tafel-Zeilen, dann DEMO-Button — vor allen Start-/Weiter-Handlern
+  if(DEV_BUILD){
+    if(demoOpen){
+      for(const rw of DEMO_ROWS){ if(gx>=rw.x&&gx<=rw.x+rw.w&&gy>=rw.y&&gy<=rw.y+rw.h){
+        if(rw.n===0){ level=1; lives=3; initGame(); demoOpen=false; sfx('start'); } // v0.11.15: STANDARD = normaler Run (demoRun=false via initGame, Rekorde zaehlen)
+        else startDemoRun(rw.n);
+        return;
+      } }
+      demoOpen=false; return; // Tipp ausserhalb der Zeilen = schliessen (und NICHT starten/weiterschalten)
+    }
+    if(gx>=DEMO_BOX.x-6&&gx<=DEMO_BOX.x+DEMO_BOX.w+6&&gy>=DEMO_BOX.y-6&&gy<=DEMO_BOX.y+DEMO_BOX.h+6){ demoOpen=true; return; }
+  }
   if(state==='play'&&buildTutTimer>0){ buildTutTimer=0; spawnFreeze=Math.min(spawnFreeze,0.8); return; } // v0.11.1: Popup per Tipp schließbar (Holger), kurzer Rest-Freeze fürs Banner
   if(state==='winanim'&&DEV_BUILD){ nextAct(); return; } // v0.11.2: DEV — Win-Screen per Tipp weiter
   startOrRestart();
 });
 // v0.4.1 (CC#2): JUMP-Button startet/neustartet auch per Touch
-document.getElementById('bJ').addEventListener('pointerdown',()=>{ if(state!=='play') startOrRestart(); });
+document.getElementById('bJ').addEventListener('pointerdown',()=>{ if(state!=='play'&&!demoOpen) startOrRestart(); }); // v0.11.13: nicht hinter der Vorfuehr-Tafel starten
 
 requestAnimationFrame(loop);
 </script>
