@@ -2,11 +2,12 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>LEVEL UP! — BC Dev Cycle · SHB 2026</title>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
+html{touch-action:none} /* E-111: auch Root-Element, iOS-Randfälle (Overscroll) */
 body{
   background:#0d0d2e;
   display:flex;align-items:center;justify-content:center;
@@ -270,6 +271,22 @@ function gapAt(pi,cxx){
 }
 
 // --- Input ---
+// v0.11.18 (E-111): iOS-Zoom-Härtung — Safari ignoriert user-scalable=no seit iOS 10,
+// und touch-action:none hat dort Lücken (Doppeltipp-Zoom beim Button-Mashing, Pinch beim
+// Zwei-Daumen-Spielen). Pinch läuft über Apples proprietäre gesture*-Events, Doppeltipp
+// über touchend — beides muss per preventDefault geblockt werden. Android unbeeinflusst.
+['gesturestart','gesturechange','gestureend'].forEach(t =>
+  document.addEventListener(t, e => e.preventDefault(), {passive:false}));
+let lastTouchEnd = 0;
+document.addEventListener('touchend', e => {
+  const now = Date.now();
+  if (now - lastTouchEnd < 350) e.preventDefault(); // Doppeltipp-Zoom unterdrücken
+  lastTouchEnd = now;
+}, {passive:false});
+document.addEventListener('touchmove', e => {
+  if (e.touches.length > 1) e.preventDefault(); // Mehrfinger = potenzielle Pinch-Geste
+}, {passive:false});
+
 const K = {};
 window.addEventListener('keydown', e => { K[e.code]=true; });
 window.addEventListener('keyup',   e => { K[e.code]=false; });
@@ -299,8 +316,11 @@ const P={
 };
 
 // --- Game state ---
-const VERSION='v0.11.17-bc'; // v0.11.17: E-107 Fass-Spawn-Facing-Fix (_face beim Spawn latchen) + Fass-Optik-Runde 2026-07-05 (Groesse 25x19, Buchstaben aus, Steh-Fass gestapelt, Menue-Faesser) (davor v0.11.16: GAP_TEST_MODE aus, Vorfuehr-Modus)
+const VERSION='v0.11.20-bc'; // v0.11.20: HUD App-Icon-Farbe vereinheitlicht (Lena-Quick-Check) — feste Farbe C.yel statt Farb-Swap, Reihe liest sich als Zähler statt Kategorie — davor v0.11.19: E-120 SHB-Link Start-/Game-Over-Screen
 const DEV_BUILD=true;      // Holger: Versionsanzeige im Spiel — vor dem Kundentag auf false stellen
+// E-120: SHB-Link (Start-/Game-Over-Screen). Ziel = SHB-Kundentag-Seite (Holger-Bestaetigung 2026-07-09). Falls E-110/Wix eine andere finale URL bringt: nur diese eine Zeile nachziehen.
+const SHB_LINK='https://www.shb-bs.com/kundentag'; // austauschbare Einzelstelle
+const SHB_LINK_LABEL='mehr zu SHB ▶'; // Anzeigetext der Link-Zeile
 let barrels=[], state='menu';
 let score=0, scoreAcc=0, level=1, lives=3;
 let act=0, cycle=0;       // E-023: Akt-System
@@ -368,6 +388,8 @@ function toggleSound(){
   if(soundOn){ ensureAC(); sfx('start'); } // User-Geste = Audio-Unlock (iOS/Chrome-Policy)
 }
 const SND_BOX={x:GW-26,y:44,w:22,h:22}; // rechts unterm HUD (kollisionsfrei: Gorilla endet ~x371 ab y~57, Button endet y=66 bei x>=374)
+// E-120: Klick-Zone der SHB-Link-Zeile (Start-/Game-Over-Screen). y wird beim Zeichnen gesetzt (2 Screens, versch. Höhe).
+const SHB_BOX={x:GW/2-90, y:0, w:180, h:16};
 
 // --- v0.11.13 (Vorfuehr-Modus, Holger/Ravi): DEV-only — Rampen-Tafel + App-Sprung (frischer Run) ---
 // Zweck: Testen + Abstimmung mit dem Kunden (alle Schwierigkeits-Stufen auf einer Seite sehen & anspielen).
@@ -1206,9 +1228,8 @@ function drawBuildingShape(bx,by,stage,W,H,ghost){
 
 // v0.5-bc (A1, E-061): App-Icon programmatisch (R-046 "Code wiederholt", 0 neue Assets)
 function drawAppIcon(x,y,sz,idx){
-  const hues=['#4a9fd4','#f5c400','#7ec850','#e06c9f','#e08a3c','#9b7ede'];
   cx.fillStyle='rgba(0,0,0,0.55)'; cx.fillRect(x-1,y-1,sz+2,sz+2);      // dunkler Rand = Kontrast gegen den Himmel
-  cx.fillStyle=hues[idx%hues.length]; cx.fillRect(x,y,sz,sz);           // Kachel, Farb-Swap pro App
+  cx.fillStyle=C.yel; cx.fillRect(x,y,sz,sz);                          // v0.11.20 (Lena-Quick-Check): feste Farbe (HUD-Leitton Gold) statt Farb-Swap — Reihe liest sich als Zähler, nicht als Kategorie
   cx.fillStyle='rgba(255,255,255,0.9)'; cx.fillRect(x+1,y+1,sz-2,2);    // Titelbalken -> liest sich als App-Fenster
   cx.fillStyle='rgba(255,255,255,0.45)'; cx.fillRect(x+1,y+sz-3,sz-3,1);
   // v0.9 (E-073/M5a): Ambient — Fenster blinkt versetzt pro App (KONZEPT §5 A-3)
@@ -1323,6 +1344,12 @@ function drawMenu(){
   cx.fillText('FEATURES SAMMELN = APP RELEASED!',GW/2,419);
   { const aw=26,ah=23,ag=8,at=5*(aw+ag)-ag,axs=GW/2-at/2;
     for(let st=1;st<=5;st++) drawBuildingShape(axs+(st-1)*(aw+ag),424,st,aw,ah,false); }
+  // E-120: SHB-Link — als Link lesbar (blau + Unterstrich), Klick-Zone SHB_BOX
+  { const ly=512; SHB_BOX.y=ly-11;
+    cx.fillStyle=C.blu; cx.font='8px "Press Start 2P"'; cx.textAlign='center';
+    cx.fillText(SHB_LINK_LABEL, GW/2, ly);
+    const tw=cx.measureText(SHB_LINK_LABEL).width;
+    cx.fillRect(GW/2-tw/2, ly+2, tw, 1); } // Unterstrich = Link-Signal
   cx.fillStyle='rgba(255,255,255,0.2)';cx.font='5px "Press Start 2P"';
   cx.fillText('PROTO '+VERSION,GW/2,540);
 }
@@ -1364,6 +1391,12 @@ function drawOver(){
     cx.fillStyle=C.wht;cx.font='9px "Press Start 2P"';
     cx.fillText('TIPPEN = NOCHMAL',GW/2,470);
   }
+  // E-120: SHB-Link auf Game-Over — identische Optik wie im Menü, eigene Höhe
+  { const ly=500; SHB_BOX.y=ly-11;
+    cx.fillStyle=C.blu; cx.font='8px "Press Start 2P"'; cx.textAlign='center';
+    cx.fillText(SHB_LINK_LABEL, GW/2, ly);
+    const tw=cx.measureText(SHB_LINK_LABEL).width;
+    cx.fillRect(GW/2-tw/2, ly+2, tw, 1); }
 }
 
 // --- Win-Animation ---
@@ -1474,6 +1507,10 @@ cv.addEventListener('pointerdown',e=>{ // v0.10 (E-067): erst Sound-Button-Hit-T
   const r=cv.getBoundingClientRect();
   const gx=(e.clientX-r.left)/r.width*GW, gy=(e.clientY-r.top)/r.height*GH;
   if(gx>=SND_BOX.x-8&&gx<=SND_BOX.x+SND_BOX.w+8&&gy>=SND_BOX.y-8&&gy<=SND_BOX.y+SND_BOX.h+8){ toggleSound(); return; }
+  // E-120: SHB-Link-Tap (nur auf Start-/Game-Over-Screen, SHB_BOX trägt die y des sichtbaren Screens)
+  if((state==='menu'||state==='over') && gx>=SHB_BOX.x&&gx<=SHB_BOX.x+SHB_BOX.w && gy>=SHB_BOX.y-6&&gy<=SHB_BOX.y+SHB_BOX.h+6){
+    window.open(SHB_LINK,'_blank','noopener'); return; // ±6px Touch-Puffer wie SND_BOX; return = kein Spielstart
+  }
   // v0.11.13 (Vorfuehr-Modus, nur DEV): erst Tafel-Zeilen, dann DEMO-Button — vor allen Start-/Weiter-Handlern
   if(DEV_BUILD){
     if(demoOpen){
