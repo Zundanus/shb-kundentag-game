@@ -107,6 +107,7 @@ const SPRITE_FILES = [
   ['barrel-schulung-menu',    '../sprites/final/barrel-schulung-menu.png'],
   // Environment-Tiles
   ['tile-platform', '../sprites/final/platform-beam.png'], // 32x16, horizontal kacheln
+  ['tile-strasse',  '../sprites/final/strasse-tile.png'],  // E-122 (Version B): Asphalt-Skin (512x512); Bordstein-Baender y232-247 (oben) / y420-431 (unten) = #d96914, Kontrast-Traeger der Kante (E-124/#035)
   ['tile-ladder',   '../sprites/final/ladder.png'],        // 18x16, vertikal kacheln
   ['tile-floor',    '../sprites/final/floor-block.png'],   // 48x48, Boden
   // App-Reward (E-046): 5 Bau-Stufen (Projekt -> Live), ersetzt das "Haus"
@@ -316,8 +317,11 @@ const P={
 };
 
 // --- Game state ---
-const VERSION='v0.11.20-bc'; // v0.11.20: HUD App-Icon-Farbe vereinheitlicht (Lena-Quick-Check) — feste Farbe C.yel statt Farb-Swap, Reihe liest sich als Zähler statt Kategorie — davor v0.11.19: E-120 SHB-Link Start-/Game-Over-Screen
+const VERSION='v0.11.21-bc'; // v0.11.21: E-122 Straßen-Reskin (Version B — Variante daneben via ?skin=strasse); Bordstein-Kontrast-Fix (fest 3px, ungestaucht) gegen E-124/#035-Auflage — davor v0.11.20: HUD App-Icon-Farbe vereinheitlicht
 const DEV_BUILD=true;      // Holger: Versionsanzeige im Spiel — vor dem Kundentag auf false stellen
+// E-122 (Version B, Marketing/SHB: "Variante daneben"): Plattform-Optik per URL waehlbar — Baustellen-Geruest bleibt Default,
+// ?skin=strasse zeigt die Asphalt-Variante. Rein optisch: Layout/Kollision/Physik sind in beiden Skins identisch (Golden-Trace-Paritaet).
+const SKIN = new URLSearchParams(location.search).get('skin')==='strasse' ? 'strasse' : 'geruest';
 // E-120: SHB-Link (Start-/Game-Over-Screen). Ziel = SHB-Kundentag-Seite (Holger-Bestaetigung 2026-07-09). Falls E-110/Wix eine andere finale URL bringt: nur diese eine Zeile nachziehen.
 const SHB_LINK='https://www.shb-bs.com/kundentag'; // austauschbare Einzelstelle
 const SHB_LINK_LABEL='mehr zu SHB ▶'; // Anzeigetext der Link-Zeile
@@ -856,6 +860,17 @@ function render(){
       for(let fy=p.y; fy<p.y+48; fy+=24)
         for(let fx=0; fx<GW; fx+=24)
           cx.drawImage(SPRITES['tile-floor'], fx, fy, 24, 24);
+    } else if(SKIN==='strasse' && SPRITES['tile-strasse']){
+      // E-122 (Version B): Strassen-Skin — schlanke 16px-Plattform wie die Stahltraeger, um 5px angehoben (p.y-8),
+      // damit Figur/Fass mittig auf der Fahrbahn zwischen den Bordsteinen sitzen. Rein optisch: Kollision bleibt bei p.y/p.h.
+      // E-124/#035-AUFLAGE: Der Bordstein (#d96914, 4,59:1) ist der Kontrast-Traeger der Plattformkante und MUSS ungestaucht
+      // an jeder Kante durchgehend sichtbar bleiben. Darum drei getrennte Zeichenschritte statt der gestauchten Voll-Quelle:
+      // Asphalt (grau, unkritisch, Stauchung erlaubt) + Bordstein oben/unten je mit FESTER, nicht mitskalierender Hoehe.
+      const ph=16, ptop=p.y-8, cH=3;                                                       // Band 16px; Bordstein je 3px fest (>=2px Ist-Hoehe am Schirm)
+      cx.fillStyle='#5c5c5c'; cx.fillRect(p.x, ptop, p.w, ph);                             // Asphalt-Grundfarbe deckt die transparente Quell-Naht
+      cx.drawImage(SPRITES['tile-strasse'], 0, 300, 512,  80, p.x, ptop+cH, p.w, ph-2*cH); // Asphalt-Textur (grau, darf gestaucht werden)
+      cx.drawImage(SPRITES['tile-strasse'], 0, 232, 512,  16, p.x, ptop,        p.w, cH);  // Bordstein OBEN — volle p.w, kein Math.min, keine Kanten-Beschneidung
+      cx.drawImage(SPRITES['tile-strasse'], 0, 420, 512,  12, p.x, ptop+ph-cH,  p.w, cH);  // Bordstein UNTEN — volle p.w
     } else if(SPRITES['tile-platform']){
       // Gerüst-Balken (32x16) horizontal gekachelt, Oberkante ~p.y
       for(let gx=p.x; gx<p.x+p.w; gx+=32){
@@ -870,9 +885,13 @@ function render(){
     }
     // v0.9 (E-073/M1): Loch-Aussparung + sichtbare Bruchkanten (Lena §6 — in 2s als Loch lesbar)
     if(pi>=1&&pi<=3){
+      // E-122 (Version B): Loch-Aussparung folgt der Bandhoehe des aktiven Skins — Strasse ist um p.y-8 angehoben,
+      // Geruest liegt bei p.y-3. Ohne diese Verzweigung schwebt in einer der beiden Varianten das Loch falsch (Cross-Ref #086).
+      const gTop = (SKIN==='strasse') ? p.y-8 : p.y-3;
+      const gMk  = (SKIN==='strasse') ? 16    : 13;   // Bruchkanten-Marker: Strasse volles Band, Geruest wie bisher
       for(const g of GAPS){ if(g.plat!==pi) continue;
-        cx.fillStyle=C.bg; cx.fillRect(g.x, p.y-3, g.w, 16);
-        cx.fillStyle=C.yel; cx.fillRect(g.x-2, p.y-3, 2, 13); cx.fillRect(g.x+g.w, p.y-3, 2, 13);
+        cx.fillStyle=C.bg; cx.fillRect(g.x, gTop, g.w, 16);
+        cx.fillStyle=C.yel; cx.fillRect(g.x-2, gTop, 2, gMk); cx.fillRect(g.x+g.w, gTop, 2, gMk);
       }
     }
     // v0.11.5 (E-100/Lena D-Nachtrag 2): Label nur waehrend der Feature-Banner-Phase (spawnFreeze>0) —
@@ -1009,6 +1028,8 @@ function render(){
   if(DEV_BUILD){
     cx.textAlign='left'; cx.font='6px "Press Start 2P"';
     cx.fillStyle='rgba(255,255,255,0.45)'; cx.fillText(VERSION, 6, 78);
+    // E-122 (Version B, Risiko-Mitigation): aktiven Skin klein anzeigen, damit ?skin=strasse beim Vorfuehren nicht unbemerkt fehlt
+    cx.fillStyle=(SKIN==='strasse')?'rgba(217,105,20,0.9)':'rgba(255,255,255,0.35)'; cx.fillText('SKIN:'+SKIN.toUpperCase(), 6, 87);
     // v0.11.13: Vorfuehr-Modus-Button (nur DEV, verschwindet mit DEV_BUILD=false)
     const d=DEMO_BOX;
     cx.fillStyle=demoOpen?'rgba(74,159,212,0.85)':'rgba(13,13,46,0.8)'; cx.fillRect(d.x,d.y,d.w,d.h);
