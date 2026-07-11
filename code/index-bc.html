@@ -229,12 +229,28 @@ const PLATS = [
 ];
 const LW = 18;
 const LADDERS = [
-  {x:346, yt:400, yb:490},
-  {x: 36, yt:310, yb:400},
-  {x:346, yt:220, yb:310},
-  {x: 36, yt:130, yb:220},
+  // Leiter-Schalter — ALLE Leitern per Flag steuerbar (tunebar fuers Balancing: Flag setzen/entfernen, kein Neu-Bauen).
+  //   save:true => H5-Savepoint: hier fahren nie Faesser runter (nur die H5-Abfahrt ist gegatet, Klettern bleibt unveraendert).
+  //   win:true  => Sieg-Leiter-Schutz (§8.3): ebenfalls keine Abfahrt — semantisch getrennt vom Savepoint, damit klar bleibt was man kippt.
+  // Beide Flags wirken gleich (keine Abfahrt), sind aber bewusst zwei Namen; win entfernen macht auch die Sieg-Leiter scharf.
+  {x:346, yt:400, yb:490, save:true},  // L0 Boden<->P1 — SAVEPOINT (unterste Ebene bleibt ruhig)
+  {x: 36, yt:310, yb:400},             // L1 P1<->P2 — H5-Abfahrten aktiv
+  {x:346, yt:220, yb:310},             // L2 P2<->P3 — H5-Abfahrten aktiv
+  {x: 36, yt:130, yb:220, win:true},   // L3 P3<->P4 — SIEG-LEITER (Win-Schutz; win:true entfernen => auch sie scharf)
 ];
 const BSPAWN = {x:358, y:104}; // über P4 (y=130-28+2=104)
+
+// --- H5 (KONZEPT §2 „Savepoint-Rampe"): Leiter-Abfahrten mit Schutz F-5b ---
+// Ein Fass rollt am Leiterkopf mit App-gestaffelter Chance NICHT weiter, sondern die Leiter
+// hinunter (eine Ebene tiefer). Struktur strikt analog Loch-Durchfall (H3b/gapFall) — eigener
+// isolierter Fall-Zweig, gapAt-Skip (F-5c), Richtung+Tempo bleiben erhalten. F-5b (nicht
+// verhandelbar): feuert nie unter dem Spieler auf derselben Leiter + Wackel-Telegraph 0,3 s.
+const LADDER_TELE = 0.3;                 // Telegraph-Wackelzeit vor Abfahrt (F-5b, ÜBERGABE §1)
+const LADDER_COOLDOWN = 1.5;             // kurzer Cooldown pro Leiter nach einer Abfahrt (Fable-Invariante), tunebar
+// §8.3 [ANNAHME Ravi, Milo offen]: Sieg-Leiter (zu P4) nie scharf — laeuft jetzt ueber das win-Flag an LADDERS (s.o.), damit ALLE Leitern per Schalter steuerbar sind.
+const LADDER_TEST_MODE = false;          // Spike/Feel-Check (ÜBERGABE §4-Alt.): Chance 1.0, keine App-Schwelle; Win-/Save-Flags bleiben aktiv
+const LADDER_TEST_CHANCE = 1.0;
+let ladderCD = [0,0,0,0];                // Rest-Cooldown je Leiter (Sekunden); Reset bei barrels=[] (initGame/nextAct)
 
 // --- v0.9-bc (E-073/M1): Löcher — app-basiert generiert (KONZEPT v2 §2/H3, F-5) ---
 // Regeln (F-5): nur P1–P3, nie unter Leitern (+28px Landepuffer), nie am Rand,
@@ -317,7 +333,7 @@ const P={
 };
 
 // --- Game state ---
-const VERSION='v0.11.21-bc'; // v0.11.21: E-122 Straßen-Reskin (Version B — Variante daneben via ?skin=strasse); Bordstein-Kontrast-Fix (fest 3px, ungestaucht) gegen E-124/#035-Auflage — davor v0.11.20: HUD App-Icon-Farbe vereinheitlicht
+const VERSION='v0.11.22-bc'; // v0.11.22: H5 „Savepoint-Rampe" — Leiter-Abfahrten mit Schutz F-5b (Telegraph 0,3 s + nie unter dem Spieler; Rampe App4 0,18/App5 0,30/App6+ 0,35; Sieg-Leiter ausgeschlossen; Abfahrt vertikal die Leiter runter, Richtung+Tempo behalten; max 1 aktiv/Ebene + Cooldown). E-Nr. via Felix. — davor v0.11.21: E-122 Straßen-Reskin (Version B via ?skin=strasse)
 const DEV_BUILD=true;      // Holger: Versionsanzeige im Spiel — vor dem Kundentag auf false stellen
 // E-122 (Version B, Marketing/SHB: "Variante daneben"): Plattform-Optik per URL waehlbar — Baustellen-Geruest bleibt Default,
 // ?skin=strasse zeigt die Asphalt-Variante. Rein optisch: Layout/Kollision/Physik sind in beiden Skins identisch (Golden-Trace-Paritaet).
@@ -393,7 +409,7 @@ function toggleSound(){
 }
 const SND_BOX={x:GW-26,y:44,w:22,h:22}; // rechts unterm HUD (kollisionsfrei: Gorilla endet ~x371 ab y~57, Button endet y=66 bei x>=374)
 // E-120: Klick-Zone der SHB-Link-Zeile (Start-/Game-Over-Screen). y wird beim Zeichnen gesetzt (2 Screens, versch. Höhe).
-const SHB_BOX={x:GW/2-90, y:0, w:180, h:16};
+const SHB_BOX={x:GW/2-90, y:0, w:180, h:22}; // E-120b (A+C): Button-Box (H 16→22); geteilte Klick-/Zeichen-Box — strokeRect MUSS exakt diese x/y/w/h nutzen
 
 // --- v0.11.13 (Vorfuehr-Modus, Holger/Ravi): DEV-only — Rampen-Tafel + App-Sprung (frischer Run) ---
 // Zweck: Testen + Abstimmung mit dem Kunden (alle Schwierigkeits-Stufen auf einer Seite sehen & anspielen).
@@ -462,9 +478,41 @@ function ladderAt(e){
   return -1;
 }
 
+// --- H5: Helfer für Leiter-Abfahrt ---
+// Leiterkopf auf der Ebene des Fasses, dessen x-Zone das Fass gerade quert (Punkt = Mittelpunkt,
+// analog gapAt). yt jeder Leiter == y ihrer Kopf-Plattform (exakt, s. LADDERS/PLATS).
+function ladderHeadAt(b){
+  const cxx=b.x+b.w/2, py=PLATS[b.platIdx].y;
+  for(let i=0;i<LADDERS.length;i++){
+    const l=LADDERS[i];
+    if(l.yt===py && cxx>l.x && cxx<l.x+LW) return i;
+  }
+  return -1;
+}
+// F-5b: Spieler klettert genau auf DIESER Leiter → Abfahrt darf weder starten noch (im Telegraph) auslösen.
+function playerOnLadder(idx){ return P.climbing && ladderAt(P)===idx; }
+// Rampe §1/§8.1: App 1–3 aus · App 4 Intro · App 5 · App 6+ Cap. (App = appsShipped+1.)
+function ladderDropChance(n=appsShipped){
+  if(n>=5) return 0.35;   // App 6+ (Cap, halten)
+  if(n===4) return 0.30;  // App 5
+  if(n===3) return 0.18;  // App 4 (Intro, Range 0,15–0,20)
+  return 0;               // App 1–3
+}
+// Würfel + strukturelle Invarianten (einmal je Querung vom Aufrufer via lastLadder garantiert).
+function ladderDropEligible(b, lh){
+  if(LADDERS[lh].win) return false;                    // §8.3: Sieg-Leiter Win-Schutz (win-Flag an LADDERS, separat vom Savepoint)
+  if(LADDERS[lh].save) return false;                   // H5 Savepoint-Leiter: keine Abfahrt — save-Flag je Leiter, s. LADDERS (tunebar fuers Balancing)
+  if(ladderCD[lh]>0) return false;                     // Cooldown pro Leiter
+  for(const o of barrels){                             // max. 1 aktive Abfahrt pro Ebene (1 Leiterkopf je Ebene)
+    if(o!==b && o.ladderIdx===lh && (o.ladderTele>0||o.ladderDrop)) return false;
+  }
+  const chance = LADDER_TEST_MODE ? LADDER_TEST_CHANCE : ladderDropChance();
+  return Math.random() < chance;
+}
+
 // --- Init ---
 function initGame(){
-  resetPlayer(); barrels=[];
+  resetPlayer(); barrels=[]; ladderCD.fill(0); // H5: Leiter-Cooldowns frisch pro Run
   act=0; cycle=0; buildLoops=0;
   appsShipped=0; featsIntoApp=0; appDoneTimer=0; // v0.5-bc (A1): App-Fortschritt frisch
   score=0; scoreAcc=0; hitFlash=0; winAnim=0; floaters=[];
@@ -492,7 +540,7 @@ function nextAct(){
   if(act===0){ featsIntoApp++;
     if(featsIntoApp >= appFeatsNeeded()){ appsShipped++; featsIntoApp=0; appDoneTimer=1.8; sfx('appdone'); }
   }
-  resetPlayer(); barrels=[];
+  resetPlayer(); barrels=[]; ladderCD.fill(0); // H5: Leiter-Cooldowns pro Akt neu
   spawnFreeze=1.2; spawnT=1.2; spawnI=actSpawnI(); // v0.5.3: kuerzere Pause -> keine leeren Akte
   moveStarted=false; lastSpawn=null; pendingWave=0; wavePauseT=0; spawnStopped=false; // v0.8 (E-072): Zyklus/Welle pro Akt neu
   generateGaps(); // v0.9 (E-073/M1): Löcher pro Akt neu würfeln (Anzahl/Breite per App-Staffel)
@@ -526,6 +574,7 @@ function spawnBarrel(){
     onGround:true, platIdx:4,
     frame:0, frameT:0,
     type, jumpScored:false, gapFall:false,
+    ladderDrop:false, ladderTele:0, ladderIdx:-1, lastLadder:-1, // H5: Abfahrt-Zustand + „einmal je Leiterkopf-Querung"-Marker (analog lastGap)
     holdT:0.45, // Sekunden stehen bleiben bevor Rollen
     _face:true, // Spawn-Fix 2026-07-06: Fass rollt nach dem Stehen immer nach links (Z.638, vx<0) -> _face vorab auf die Roll-Richtung latchen, sonst zeigt es waehrend holdT unges­piegelt (= verkehrt) und dreht sich erst beim Losrollen sichtbar um
   });
@@ -547,7 +596,7 @@ function updatePlayer(dt){
         if(appsShipped>HS_APPS){ HS_APPS=appsShipped; try{localStorage.setItem('shb_bc_apps',HS_APPS);}catch(e){} } // v0.5-bc (A1)
         }
       } else {
-        resetPlayer(); barrels=[]; spawnFreeze=2; spawnT=2; hitFlash=0; spawnStopped=false; // M3: Zielgerade neu verdienen
+        resetPlayer(); barrels=[]; ladderCD.fill(0); spawnFreeze=2; spawnT=2; hitFlash=0; spawnStopped=false; // M3: Zielgerade neu verdienen (H5: Cooldowns mit)
       }
     }
     return;
@@ -634,6 +683,9 @@ function updateBarrels(dt){
   // Spawn-Freeze (E-025)
   if(spawnFreeze>0){ spawnFreeze-=dt; return; }
 
+  // H5: Leiter-Cooldowns runterzählen
+  for(let i=0;i<ladderCD.length;i++) if(ladderCD[i]>0) ladderCD[i]=Math.max(0, ladderCD[i]-dt);
+
   const MINGAP=Math.max(90, Math.round(actSpeed()*1.2)); // v0.11 (FT-2): Reaktionslücke 1,15→1,2 s (Fremdtester: Abstand am Handy fast nicht handhabbar), Floor 90 px
   // v0.11 (FT-2, Fremdtester): Wellen an der App statt am Akt — Start 3, +1 pro App, Deckel 5; dazwischen echte Atempause.
   const HARDCAP=8;                    // v0.11.2 (Holger-Bild: Nachschub stockte — Deckel 5 war mit Welle 3 sofort voll) 5→8, tunebar; Fairness trägt MINGAP
@@ -666,7 +718,16 @@ function updateBarrels(dt){
       if(b.holdT<=0){ b.vx=-actSpeed()*BARREL_TYPES[b.type].spd; } // jetzt losrollen (v0.9/M2: Typ-Tempo)
       continue; // noch nicht physikupdaten
     }
-    if(b.onGround){
+    // H5/F-5b: Telegraph-Phase — Fass wackelt am Leiterkopf und steht still (kein x/y-Update).
+    // Der Wackler ist der Tell „gleich fährt es ab"; drawBarrel zeichnet ihn aus b.ladderTele.
+    if(b.ladderTele>0){
+      if(playerOnLadder(b.ladderIdx)){ b.ladderTele=0; b.ladderIdx=-1; } // F-5b: Spieler betritt DIESE Leiter mitten im Telegraph -> Abbruch, Fass rollt nächsten Frame normal weiter (§8.6)
+      else {
+        b.ladderTele-=dt;
+        if(b.ladderTele<=0){ b.onGround=false; b.vy=40; b.ladderDrop=true; ladderCD[b.ladderIdx]=LADDER_COOLDOWN; } // Abfahrt startet: Richtung+Tempo bleiben via b.vx erhalten (kein Reset); Leiter geht in Cooldown
+      }
+      // kein Movement — Kollision/Jump-Bonus/Anim laufen unten weiter (Fass ist eine echte Bedrohung, auch stehend)
+    } else if(b.onGround){
       b.vy=0;
       const p=PLATS[b.platIdx];
       b.x+=b.vx*dt;
@@ -676,6 +737,15 @@ function updateBarrels(dt){
         b.lastGap=gnow;
         if((GAP_TEST_MODE||appsShipped>=2) && Math.random()<(GAP_TEST_MODE?GAP_TEST_CHANCE:GAP_DROP_CHANCE)){ b.onGround=false; b.vy=40; b.gapFall=true; continue; } // Durchfall E-074 (ab App 3, 10%); TEST-Modus s. GAP_TEST_MODE — siehe gapFall-Zweig unten
       } else if(!gnow){ b.lastGap=null; }
+      // H5: Leiter-Abfahrt am Leiterkopf — einmal je Querung würfeln (lastLadder wie lastGap).
+      // Treffer + Invarianten + F-5b (Spieler nicht auf DIESER Leiter) -> Telegraph starten, sonst rollt es weiter.
+      const lh=ladderHeadAt(b);
+      if(lh>=0){
+        if(b.lastLadder!==lh){
+          b.lastLadder=lh;
+          if(ladderDropEligible(b, lh) && !playerOnLadder(lh)){ b.ladderTele=LADDER_TELE; b.ladderIdx=lh; } // b.vx unangetastet: Tempo/Richtung fürs Erhalten gemerkt
+        }
+      } else b.lastLadder=-1;
       b.y=p.y-b.h; // Hüpfer ist rein visuell in drawBarrel (v0.9.6/E-079 — exakt wie Vibe v0.6.0)
       const offR=b.vx>0&&b.x+b.w>p.x+p.w+5;
       const offL=b.vx<0&&b.x<p.x-5;
@@ -698,6 +768,30 @@ function updateBarrels(dt){
           const prevB=b.y+b.h-b.vy*dt;
           if(prevB<=p.y+3&&b.y+b.h>=p.y&&b.x+b.w>p.x+4&&b.x<p.x+p.w-4){
             b.y=p.y-b.h;b.vy=0;b.onGround=true;b.platIdx=pi;b.gapFall=false;b.lastGap=null;
+            break; // b.vx bleibt: gleiche Richtung, gleiches Tempo (kein PLATS[pi].dir!)
+          }
+        }
+      }
+    } else if(b.ladderDrop){
+      // H5: Leiter-Abfahrt — eigener isolierter Zweig (Vorbild gapFall/H3b, ÜBERGABE §3).
+      // Fass geht die Leiter HINUNTER: vertikal, x sanft auf Leitermitte. BEWUSST NICHT als Projektil
+      // mit Horizontal-Impuls (b.x+=b.vx*dt) — das driftete an den Rand-Leitern L1/L3 (x36, direkt an
+      // der Plattform-Kante) über den Rand hinaus und ließ das Fass VERSCHWINDEN statt landen
+      // (Golden-Trace B, 2026-07-09). Richtung + Tempo (b.vx unangetastet) bleiben für das Weiterrollen
+      // NACH der Landung erhalten — bewusst NICHT PLATS[pi].dir, sonst der „springt zurück"-Bug
+      // (Bugreport-Nachtrag 2/3, §2/§8.2). Landung respektiert gapAt-Skip (F-5c); unten oft
+      // Gegenstrom-Fass -> vom sanierten Klemm-Pass (v0.11.9–12) automatisch erfasst.
+      const l=LADDERS[b.ladderIdx];
+      b.x += (l.x+LW/2 - b.w/2 - b.x)*0.3; // die Leiter runter statt seitlich über die Kante driften
+      b.vy+=900*dt; b.y+=b.vy*dt;
+      if(b.vy>=0){
+        for(let pi=0;pi<b.platIdx;pi++){
+          const p=PLATS[pi];
+          if(gapAt(pi, b.x+b.w/2)) continue; // F-5c: nie in einer Lücke landen — dann eine Ebene weiter fallen
+          const prevB=b.y+b.h-b.vy*dt;
+          if(prevB<=p.y+3&&b.y+b.h>=p.y&&b.x+b.w>p.x+4&&b.x<p.x+p.w-4){
+            b.y=p.y-b.h;b.vy=0;b.onGround=true;b.platIdx=pi;
+            b.ladderDrop=false;b.ladderIdx=-1;b.lastLadder=-1;b.lastGap=null;
             break; // b.vx bleibt: gleiche Richtung, gleiches Tempo (kein PLATS[pi].dir!)
           }
         }
@@ -746,7 +840,7 @@ function updateBarrels(dt){
   for(let i=0;i<barrels.length;i++){
     for(let j=i+1;j<barrels.length;j++){
       const a=barrels[i], b=barrels[j];
-      if(a.platIdx!==b.platIdx || !a.onGround || !b.onGround || a.holdT>0 || b.holdT>0) continue;
+      if(a.platIdx!==b.platIdx || !a.onGround || !b.onGround || a.holdT>0 || b.holdT>0 || a.ladderTele>0 || b.ladderTele>0) continue; // H5: telegraphierendes Fass steht -> nicht klemmen (wie Halte-Fass)
       if((a.vx>0)!==(b.vx>0)) continue; // v0.11.9: Gegenstrom-Fass (Loch-Durchfall behaelt Richtung) — Begegnungs-Paare nicht klemmen, sonst schiebt eins das andere rueckwaerts ("springt zurueck"-Optik); kurzes Kreuzen ist ok
       if(Math.abs(a.x-b.x) >= MINGAP) continue;
       const dir=a.vx>0?1:-1;                          // Rollrichtung des Paars (nach Durchfall ggf. != PLATS.dir; Vorzeichen oben als gleich geprueft)
@@ -1158,7 +1252,9 @@ function drawBarrel(b){
     const g=gapAt(b.platIdx, b.x+b.w/2);
     if(g){ const gt=Math.max(0,Math.min(1,(b.x+b.w/2-g.x)/g.w)); hop=Math.sin(Math.PI*gt)*12; }
   }
-  const bx=b.x|0, by=(b.y-hop)|0;
+  // H5/F-5b: Wackel-Telegraph — Fass zittert ~0,3 s am Leiterkopf („gleich fährt es ab").
+  const wob = b.ladderTele>0 ? Math.sin(Date.now()/28)*2.2 : 0;
+  const bx=(b.x+wob)|0, by=(b.y-hop)|0;
   // v0.9 (E-073/M2, Lena §6): Tell für schnelle Fässer (spd>=1.3) — Speed-Lines hinter dem Fass
   if(b.onGround && b.holdT<=0 && BARREL_TYPES[b.type].spd>=1.3){
     const sldir=b.vx>0?-1:1;
@@ -1365,12 +1461,11 @@ function drawMenu(){
   cx.fillText('FEATURES SAMMELN = APP RELEASED!',GW/2,419);
   { const aw=26,ah=23,ag=8,at=5*(aw+ag)-ag,axs=GW/2-at/2;
     for(let st=1;st<=5;st++) drawBuildingShape(axs+(st-1)*(aw+ag),424,st,aw,ah,false); }
-  // E-120: SHB-Link — als Link lesbar (blau + Unterstrich), Klick-Zone SHB_BOX
-  { const ly=512; SHB_BOX.y=ly-11;
-    cx.fillStyle=C.blu; cx.font='8px "Press Start 2P"'; cx.textAlign='center';
-    cx.fillText(SHB_LINK_LABEL, GW/2, ly);
-    const tw=cx.measureText(SHB_LINK_LABEL).width;
-    cx.fillRect(GW/2-tw/2, ly+2, tw, 1); } // Unterstrich = Link-Signal
+  // E-120b (A, Lena): SHB-Link als Gold-Button-Box statt blauer Textzeile (prominenter). y=512 bleibt (E-112-Layout-Schutz).
+  { const ly=512; SHB_BOX.y=ly-15; // Box vertikal um den Text zentriert (h=22)
+    cx.strokeStyle=C.yel; cx.lineWidth=1; cx.strokeRect(SHB_BOX.x, SHB_BOX.y, SHB_BOX.w, SHB_BOX.h); // exakt SHB_BOX = Klick-Zone
+    cx.fillStyle=C.yel; cx.font='8px "Press Start 2P"'; cx.textAlign='center';
+    cx.fillText(SHB_LINK_LABEL, GW/2, ly); } // Pfeil ▶ bleibt Teil des Labels; Box IST jetzt das Link-Signal (Unterstrich entfällt)
   cx.fillStyle='rgba(255,255,255,0.2)';cx.font='5px "Press Start 2P"';
   cx.fillText('PROTO '+VERSION,GW/2,540);
 }
@@ -1412,12 +1507,12 @@ function drawOver(){
     cx.fillStyle=C.wht;cx.font='9px "Press Start 2P"';
     cx.fillText('TIPPEN = NOCHMAL',GW/2,470);
   }
-  // E-120: SHB-Link auf Game-Over — identische Optik wie im Menü, eigene Höhe
-  { const ly=500; SHB_BOX.y=ly-11;
-    cx.fillStyle=C.blu; cx.font='8px "Press Start 2P"'; cx.textAlign='center';
-    cx.fillText(SHB_LINK_LABEL, GW/2, ly);
-    const tw=cx.measureText(SHB_LINK_LABEL).width;
-    cx.fillRect(GW/2-tw/2, ly+2, tw, 1); }
+  // E-120b (C, Lena): SHB-Gold-Box hoch auf ~452 — direkt unter „GLOBAL EINREICHEN" (Box-bottom 436),
+  // klemmt zwischen dessen Unterkante und „TIPPEN = NOCHMAL" (y=470); Box 437..459 lässt oben/unten je ~1–2px Luft.
+  { const ly=452; SHB_BOX.y=ly-15;
+    cx.strokeStyle=C.yel; cx.lineWidth=1; cx.strokeRect(SHB_BOX.x, SHB_BOX.y, SHB_BOX.w, SHB_BOX.h); // exakt SHB_BOX = Klick-Zone
+    cx.fillStyle=C.yel; cx.font='8px "Press Start 2P"'; cx.textAlign='center';
+    cx.fillText(SHB_LINK_LABEL, GW/2, ly); }
 }
 
 // --- Win-Animation ---
