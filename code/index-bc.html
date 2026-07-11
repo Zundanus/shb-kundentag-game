@@ -333,7 +333,7 @@ const P={
 };
 
 // --- Game state ---
-const VERSION='v0.11.22-bc'; // v0.11.22: H5 „Savepoint-Rampe" — Leiter-Abfahrten mit Schutz F-5b (Telegraph 0,3 s + nie unter dem Spieler; Rampe App4 0,18/App5 0,30/App6+ 0,35; Sieg-Leiter ausgeschlossen; Abfahrt vertikal die Leiter runter, Richtung+Tempo behalten; max 1 aktiv/Ebene + Cooldown). E-Nr. via Felix. — davor v0.11.21: E-122 Straßen-Reskin (Version B via ?skin=strasse)
+const VERSION='v0.11.24-bc'; // v0.11.24: Review-Cleanup — #5 landBelow-Helper (Lande-Detektion gapFall/ladderDrop/normal vereinheitlicht) + #6 drawShbLinkBox-Helper (SHB-Box Menue/Game-Over); reine Refactorings, Verhalten unveraendert. #3 (Klemm-Pass-Ausnahme) geprueft = NOETIG, kein Change. — davor v0.11.23: E-120b-Fix — Game-Over-SHB-Box-Tap ohne ±6-Puffer (Fehltipp am Boxrand öffnete SHB-URL statt Neustart; Review-Fund #1, bestätigt y433/y463). — davor v0.11.22: H5 „Savepoint-Rampe" — Leiter-Abfahrten mit Schutz F-5b (Telegraph 0,3 s + nie unter dem Spieler; Rampe App4 0,18/App5 0,30/App6+ 0,35; Sieg-Leiter ausgeschlossen; max 1 aktiv/Ebene + Cooldown; Leiter-Schalter save/win). E-Nr. via Felix. — davor v0.11.21: E-122 Straßen-Reskin (Version B via ?skin=strasse)
 const DEV_BUILD=true;      // Holger: Versionsanzeige im Spiel — vor dem Kundentag auf false stellen
 // E-122 (Version B, Marketing/SHB: "Variante daneben"): Plattform-Optik per URL waehlbar — Baustellen-Geruest bleibt Default,
 // ?skin=strasse zeigt die Asphalt-Variante. Rein optisch: Layout/Kollision/Physik sind in beiden Skins identisch (Golden-Trace-Paritaet).
@@ -508,6 +508,24 @@ function ladderDropEligible(b, lh){
   }
   const chance = LADDER_TEST_MODE ? LADDER_TEST_CHANCE : ladderDropChance();
   return Math.random() < chance;
+}
+
+// Fund #5 (Review-Cleanup): gemeinsame Lande-Detektion fuer gapFall/ladderDrop/normalen Fall. Sucht die oberste
+// Plattform < maxPi, deren y das Fass in DIESEM Frame quert (aufsteigende Schleife, dt-Cap-sicher), setzt
+// y/vy/onGround/platIdx und liefert den Landeindex (-1 = nicht gelandet). b.vx bleibt unberuehrt — die
+// zweig-spezifische Nach-Lande-Aktion (Richtung behalten vs. PLATS.dir, Flag-Resets) macht der Aufrufer.
+function landBelow(b, dt, maxPi){
+  if(b.vy<0) return -1;
+  for(let pi=0;pi<maxPi;pi++){
+    const p=PLATS[pi];
+    if(gapAt(pi, b.x+b.w/2)) continue;                 // F-5c: nie in einer Luecke landen
+    const prevB=b.y+b.h-b.vy*dt;
+    if(prevB<=p.y+3&&b.y+b.h>=p.y&&b.x+b.w>p.x+4&&b.x<p.x+p.w-4){
+      b.y=p.y-b.h;b.vy=0;b.onGround=true;b.platIdx=pi;
+      return pi;
+    }
+  }
+  return -1;
 }
 
 // --- Init ---
@@ -761,17 +779,7 @@ function updateBarrels(dt){
       // weiterrollen", Abkuerzung nach unten). Historie: v0.11.7 (Landen nur auf Ursprungs-
       // Plattform, ohne Durchquerungs-Check) war eine Fehldeutung → Zucken statt Durchfall.
       b.vy+=900*dt; b.x+=b.vx*dt; b.y+=b.vy*dt;
-      if(b.vy>=0){
-        for(let pi=0;pi<b.platIdx;pi++){
-          const p=PLATS[pi];
-          if(gapAt(pi, b.x+b.w/2)) continue; // F-5c: nie in einer Luecke landen — dann eine Ebene weiter fallen
-          const prevB=b.y+b.h-b.vy*dt;
-          if(prevB<=p.y+3&&b.y+b.h>=p.y&&b.x+b.w>p.x+4&&b.x<p.x+p.w-4){
-            b.y=p.y-b.h;b.vy=0;b.onGround=true;b.platIdx=pi;b.gapFall=false;b.lastGap=null;
-            break; // b.vx bleibt: gleiche Richtung, gleiches Tempo (kein PLATS[pi].dir!)
-          }
-        }
-      }
+      if(landBelow(b,dt,b.platIdx)>=0){ b.gapFall=false;b.lastGap=null; } // Fund #5: Lande-Detektion via Helper; b.vx bleibt (gleiche Richtung/Tempo, kein PLATS.dir)
     } else if(b.ladderDrop){
       // H5: Leiter-Abfahrt — eigener isolierter Zweig (Vorbild gapFall/H3b, ÜBERGABE §3).
       // Fass geht die Leiter HINUNTER: vertikal, x sanft auf Leitermitte. BEWUSST NICHT als Projektil
@@ -784,32 +792,11 @@ function updateBarrels(dt){
       const l=LADDERS[b.ladderIdx];
       b.x += (l.x+LW/2 - b.w/2 - b.x)*0.3; // die Leiter runter statt seitlich über die Kante driften
       b.vy+=900*dt; b.y+=b.vy*dt;
-      if(b.vy>=0){
-        for(let pi=0;pi<b.platIdx;pi++){
-          const p=PLATS[pi];
-          if(gapAt(pi, b.x+b.w/2)) continue; // F-5c: nie in einer Lücke landen — dann eine Ebene weiter fallen
-          const prevB=b.y+b.h-b.vy*dt;
-          if(prevB<=p.y+3&&b.y+b.h>=p.y&&b.x+b.w>p.x+4&&b.x<p.x+p.w-4){
-            b.y=p.y-b.h;b.vy=0;b.onGround=true;b.platIdx=pi;
-            b.ladderDrop=false;b.ladderIdx=-1;b.lastLadder=-1;b.lastGap=null;
-            break; // b.vx bleibt: gleiche Richtung, gleiches Tempo (kein PLATS[pi].dir!)
-          }
-        }
-      }
+      if(landBelow(b,dt,b.platIdx)>=0){ b.ladderDrop=false;b.ladderIdx=-1;b.lastLadder=-1;b.lastGap=null; } // Fund #5: Lande-Detektion via Helper; b.vx bleibt
     } else {
       b.vy+=900*dt; b.x+=b.vx*dt; b.y+=b.vy*dt;
-      if(b.vy>=0){
-        for(let pi=0;pi<PLATS.length;pi++){
-          const p=PLATS[pi];
-          if(gapAt(pi, b.x+b.w/2)) continue; // v0.9 (M1): Fässer landen nicht IN einer Lücke (hüpfen drüber)
-          const prevB=b.y+b.h-b.vy*dt;
-          if(prevB<=p.y+3&&b.y+b.h>=p.y&&b.x+b.w>p.x+4&&b.x<p.x+p.w-4){
-            b.y=p.y-b.h;b.vy=0;b.onGround=true;b.platIdx=pi;
-            b.vx=PLATS[pi].dir*actSpeed()*BARREL_TYPES[b.type].spd; // v0.9/M2: Typ-Tempo
-            break;
-          }
-        }
-      }
+      const lp=landBelow(b,dt,PLATS.length); // Fund #5: Lande-Detektion via Helper (alle Plattformen)
+      if(lp>=0){ b.vx=PLATS[lp].dir*actSpeed()*BARREL_TYPES[b.type].spd; } // v0.9/M2: Typ-Tempo, Richtung = Plattform-Strom
     }
     if(b.y>GH+80||b.x<-80||b.x>GW+80){barrels.splice(i,1);continue;}
 
@@ -1413,6 +1400,14 @@ function drawHUD(){
 }
 
 // --- Menü ---
+// Fund #6 (Review-Cleanup): SHB-Gold-Box — Menue + Game-Over teilen sich die Zeichnung. ly = Text-Baseline-y,
+// Box sitzt SHB_BOX.y=ly-15 (h=22). Hit-Test (shbPad, pointerdown) ist bewusst GETRENNT — hier NUR Optik.
+function drawShbLinkBox(ly){
+  SHB_BOX.y=ly-15;
+  cx.strokeStyle=C.yel; cx.lineWidth=1; cx.strokeRect(SHB_BOX.x, SHB_BOX.y, SHB_BOX.w, SHB_BOX.h); // exakt SHB_BOX = Klick-Zone
+  cx.fillStyle=C.yel; cx.font='8px "Press Start 2P"'; cx.textAlign='center';
+  cx.fillText(SHB_LINK_LABEL, GW/2, ly);
+}
 function drawMenu(){
   cx.fillStyle='rgba(13,13,46,0.9)'; cx.fillRect(0,0,GW,GH);
   cx.textAlign='center';
@@ -1462,10 +1457,7 @@ function drawMenu(){
   { const aw=26,ah=23,ag=8,at=5*(aw+ag)-ag,axs=GW/2-at/2;
     for(let st=1;st<=5;st++) drawBuildingShape(axs+(st-1)*(aw+ag),424,st,aw,ah,false); }
   // E-120b (A, Lena): SHB-Link als Gold-Button-Box statt blauer Textzeile (prominenter). y=512 bleibt (E-112-Layout-Schutz).
-  { const ly=512; SHB_BOX.y=ly-15; // Box vertikal um den Text zentriert (h=22)
-    cx.strokeStyle=C.yel; cx.lineWidth=1; cx.strokeRect(SHB_BOX.x, SHB_BOX.y, SHB_BOX.w, SHB_BOX.h); // exakt SHB_BOX = Klick-Zone
-    cx.fillStyle=C.yel; cx.font='8px "Press Start 2P"'; cx.textAlign='center';
-    cx.fillText(SHB_LINK_LABEL, GW/2, ly); } // Pfeil ▶ bleibt Teil des Labels; Box IST jetzt das Link-Signal (Unterstrich entfällt)
+  drawShbLinkBox(512); // Fund #6: gemeinsamer Helper (Pfeil ▶ bleibt Teil des Labels; Box IST das Link-Signal)
   cx.fillStyle='rgba(255,255,255,0.2)';cx.font='5px "Press Start 2P"';
   cx.fillText('PROTO '+VERSION,GW/2,540);
 }
@@ -1509,10 +1501,7 @@ function drawOver(){
   }
   // E-120b (C, Lena): SHB-Gold-Box hoch auf ~452 — direkt unter „GLOBAL EINREICHEN" (Box-bottom 436),
   // klemmt zwischen dessen Unterkante und „TIPPEN = NOCHMAL" (y=470); Box 437..459 lässt oben/unten je ~1–2px Luft.
-  { const ly=452; SHB_BOX.y=ly-15;
-    cx.strokeStyle=C.yel; cx.lineWidth=1; cx.strokeRect(SHB_BOX.x, SHB_BOX.y, SHB_BOX.w, SHB_BOX.h); // exakt SHB_BOX = Klick-Zone
-    cx.fillStyle=C.yel; cx.font='8px "Press Start 2P"'; cx.textAlign='center';
-    cx.fillText(SHB_LINK_LABEL, GW/2, ly); }
+  drawShbLinkBox(452); // Fund #6: gemeinsamer Helper (enge C-Platzierung s. Kommentar drueber; Hit-Test shbPad bleibt getrennt)
 }
 
 // --- Win-Animation ---
@@ -1624,8 +1613,12 @@ cv.addEventListener('pointerdown',e=>{ // v0.10 (E-067): erst Sound-Button-Hit-T
   const gx=(e.clientX-r.left)/r.width*GW, gy=(e.clientY-r.top)/r.height*GH;
   if(gx>=SND_BOX.x-8&&gx<=SND_BOX.x+SND_BOX.w+8&&gy>=SND_BOX.y-8&&gy<=SND_BOX.y+SND_BOX.h+8){ toggleSound(); return; }
   // E-120: SHB-Link-Tap (nur auf Start-/Game-Over-Screen, SHB_BOX trägt die y des sichtbaren Screens)
-  if((state==='menu'||state==='over') && gx>=SHB_BOX.x&&gx<=SHB_BOX.x+SHB_BOX.w && gy>=SHB_BOX.y-6&&gy<=SHB_BOX.y+SHB_BOX.h+6){
-    window.open(SHB_LINK,'_blank','noopener'); return; // ±6px Touch-Puffer wie SND_BOX; return = kein Spielstart
+  // E-120b-Fix (Review-Fund #1): Game-Over-Screen ist eng gepackt (GLOBAL-EINREICHEN-Box endet y436, SHB-Box 437..459,
+  // TIPPEN y470) — dort KEIN Touch-Puffer, sonst fing der ±6-Puffer Neustart-Fehltipps am Boxrand ab und öffnete die
+  // SHB-URL statt Neustart (bestätigt y433/y463). Auf dem Menü (Platz genug) bleibt ±6 wie SND_BOX.
+  const shbPad=(state==='over')?0:6;
+  if((state==='menu'||state==='over') && gx>=SHB_BOX.x&&gx<=SHB_BOX.x+SHB_BOX.w && gy>=SHB_BOX.y-shbPad&&gy<=SHB_BOX.y+SHB_BOX.h+shbPad){
+    window.open(SHB_LINK,'_blank','noopener'); return; // Menü ±6 wie SND_BOX / Game-Over 0; return = kein Spielstart
   }
   // v0.11.13 (Vorfuehr-Modus, nur DEV): erst Tafel-Zeilen, dann DEMO-Button — vor allen Start-/Weiter-Handlern
   if(DEV_BUILD){
