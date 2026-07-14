@@ -55,6 +55,14 @@ canvas{display:block;image-rendering:pixelated;touch-action:none}
 #bR::after{left:-14px;right:-8px}
 #bU::after{bottom:-2px}
 #bD::after{top:-2px}
+/* v0.11.30 (E-111 Rettungsnetz, Review #2): Banner, wenn die Seite trotz Blocker gezoomt ist —
+   solange sichtbar, sind die Zoom-Blocker ausgesetzt, damit Pinch-out wieder funktioniert */
+#zoomHint{
+  display:none;position:fixed;top:10px;left:50%;transform:translateX(-50%);
+  z-index:99;max-width:92vw;text-align:center;pointer-events:none;
+  background:#b52a2a;color:#fff;border:2px solid #fff;border-radius:6px;
+  padding:8px 10px;font-size:8px;line-height:1.7;
+}
 </style>
 </head>
 <body>
@@ -68,6 +76,7 @@ canvas{display:block;image-rendering:pixelated;touch-action:none}
   <div class="btn" id="bJ">JUMP<br>↑</div>
 </div>
 </div>
+<div id="zoomHint">ZOOM AKTIV<br>MIT ZWEI FINGERN RAUSZOOMEN</div>
 <script>
 /* ============================================================
    LEVEL UP! — BC Dev Cycle · SHB Kundentag 2026
@@ -311,20 +320,46 @@ function gapAt(pi,cxx){
 }
 
 // --- Input ---
-// v0.11.18 (E-111): iOS-Zoom-Härtung — Safari ignoriert user-scalable=no seit iOS 10,
-// und touch-action:none hat dort Lücken (Doppeltipp-Zoom beim Button-Mashing, Pinch beim
-// Zwei-Daumen-Spielen). Pinch läuft über Apples proprietäre gesture*-Events, Doppeltipp
-// über touchend — beides muss per preventDefault geblockt werden. Android unbeeinflusst.
+// E-111: iOS-Zoom-Härtung, vier Schichten + Rettungsnetz (v0.11.18 gesture*/touchend/touchmove ·
+// v0.11.29/30 touchstart + visualViewport). Safari ignoriert user-scalable=no seit iOS 10, und
+// touch-action:none hat dort Lücken (Doppeltipp-Zoom beim Button-Mashing, Pinch beim Zwei-Daumen-
+// Spielen — Holger-Reports 2026-07: Zoom auf großem iPhone TROTZ gesture*-preventDefault). Schichten:
+//   1) touchstart: Mehrfinger sofort preventDefaulten — kappt die Pinch-Erkennung, bevor iOS committet.
+//      BEDINGUNGSLOS (Review v0.11.29 #1): eine .btn-Ausnahme wäre nutzlos UND löchrig — sämtliche
+//      Interaktionen (mkBtn, Canvas-Start/SHB, bJ) laufen über Pointer-Events, die von touchstart-
+//      preventDefault unberührt bleiben; die ::after-Halos (+14px) machten „knapp neben dem Button"
+//      sonst wieder zur Pinch-Lücke, und WebKit-Text-Node-Targets brächen jede closest('.btn')-Prüfung.
+//   2) touchmove: Mehrfinger-Bewegung blocken (Pinch, der touchstart überlebt hat).
+//   3) touchend: Doppeltipp <350 ms unterdrücken (Smart-Zoom beim Button-Mashing).
+//   4) gesture* (Apple-proprietär): letzter Fang für die native Pinch-Pipeline.
+// RETTUNGSNETZ (Review v0.11.29 #2): Rutscht trotzdem ein Zoom durch (Bedienungshilfen-Zoom, Safari-
+// Quirk, Race vor Handler-Registrierung), wären genau diese Blocker der Grund, dass man nicht mehr
+// RAUSzoomen kann („kein Rückweg"). Darum visualViewport.scale beobachten: solange gezoomt, alle
+// Blocker aussetzen (Pinch-out erlauben) + Hinweis-Banner (#zoomHint). Android unbeeinflusst
+// (kein gesture*, Page-Zoom im Spiel nicht auslösbar, visualViewport.scale bleibt 1).
+let vvZoomed = false;
+const zoomHint = document.getElementById('zoomHint');
+if (window.visualViewport) {
+  const vvCheck = () => {
+    vvZoomed = window.visualViewport.scale > 1.02; // Toleranz gegen Subpixel-Rundung
+    zoomHint.style.display = vvZoomed ? 'block' : 'none';
+  };
+  window.visualViewport.addEventListener('resize', vvCheck);
+  vvCheck(); // falls die Seite bereits gezoomt geladen wird
+}
 ['gesturestart','gesturechange','gestureend'].forEach(t =>
-  document.addEventListener(t, e => e.preventDefault(), {passive:false}));
+  document.addEventListener(t, e => { if (!vvZoomed) e.preventDefault(); }, {passive:false}));
 let lastTouchEnd = 0;
 document.addEventListener('touchend', e => {
   const now = Date.now();
-  if (now - lastTouchEnd < 350) e.preventDefault(); // Doppeltipp-Zoom unterdrücken
+  if (!vvZoomed && now - lastTouchEnd < 350) e.preventDefault(); // Doppeltipp-Zoom unterdrücken
   lastTouchEnd = now;
 }, {passive:false});
 document.addEventListener('touchmove', e => {
-  if (e.touches.length > 1) e.preventDefault(); // Mehrfinger = potenzielle Pinch-Geste
+  if (!vvZoomed && e.touches.length > 1) e.preventDefault(); // Mehrfinger = potenzielle Pinch-Geste
+}, {passive:false});
+document.addEventListener('touchstart', e => {
+  if (!vvZoomed && e.touches.length >= 2) e.preventDefault(); // Einzeltipp (Start/Neustart/Button) nie blocken
 }, {passive:false});
 
 const K = {};
@@ -361,14 +396,16 @@ const P={
 };
 
 // --- Game state ---
-const VERSION='v0.11.28-bc'; // v0.11.28: iOS-Long-Press-Fix — -webkit-user-select:none + -webkit-touch-callout:none auf .btn (Steuer-Buttons) und body; unterdrückt Callout/Lupe/Text-Selektion beim langen Halten der Touch-Controls auf iPhone (Holger-Report 2026-07-13). — davor v0.11.27: GLOBAL-EINREICHEN-Platzhalter im Game-Over-Screen hinter DEV_BUILD versteckt (Highscore = Sprint 2, reiner Text ohne Klick → im öffentlichen Build DEV_BUILD=false ausgeblendet; SHB-Box + „TIPPEN = NOCHMAL" bleiben). — davor v0.11.26 (Zusatz A6): iframe-Scroll-Fix — keydown-Handler (K-State) fängt die Steuertasten (Pfeile/Space/WASD) mit preventDefault ab, damit die Wirtsseite in der Wix-/iframe-Einbettung bei ↑/↓/Leertaste nicht mehr scrollt. keyup unverändert. — davor v0.11.25 (Sanft-Pass, E-138): Handy-Entschärfung. HAPPEN A (Balancing, Startwerte): MINGAP 1,2→1,35 s (A1) · HARDCAP 8→6, Fallback 7 (A2) · waveSize 3/4/5→2/3/4 (A3) · APP_SPEED Stand-Zone gedehnt 80/88/96, Max erst App 7 (A4) · Durchfall ab App 4 statt App 3 (A5). HAPPEN B (Handling/mobile Fairness, Startwerte): ◀/▶ auseinandergezogen (bL left 10→6, bR 86→150, neutrale Lücke + volle Trefferzonen) (B1) · Control-Scale-Floor 0,82 gegen zu kleine Buttons (B2) · JUMP in die freie Ecke gewachsen (B3) · Sprung-Puffer 120 ms + Coyote-Zeit 100 ms (B4). HANDY-JUSTAGE (Holger, 2026-07-11): ◀/▶-Lücke −50% (bR 150→110); Touch-Steuerung nur bei state==='play' sichtbar (im Menü/Game-Over/Win ausgeblendet). Alle Zahlen Startwerte — Endwerte via Handy-Playtest (Fremder, 1 Variable/Runde). — davor v0.11.24: Review-Cleanup — #5 landBelow-Helper (Lande-Detektion gapFall/ladderDrop/normal vereinheitlicht) + #6 drawShbLinkBox-Helper (SHB-Box Menue/Game-Over); reine Refactorings, Verhalten unveraendert. #3 (Klemm-Pass-Ausnahme) geprueft = NOETIG, kein Change. — davor v0.11.23: E-120b-Fix — Game-Over-SHB-Box-Tap ohne ±6-Puffer (Fehltipp am Boxrand öffnete SHB-URL statt Neustart; Review-Fund #1, bestätigt y433/y463). — davor v0.11.22: H5 „Savepoint-Rampe" — Leiter-Abfahrten mit Schutz F-5b (Telegraph 0,3 s + nie unter dem Spieler; Rampe App4 0,18/App5 0,30/App6+ 0,35; Sieg-Leiter ausgeschlossen; max 1 aktiv/Ebene + Cooldown; Leiter-Schalter save/win). E-Nr. via Felix. — davor v0.11.21: E-122 Straßen-Reskin (Version B via ?skin=strasse)
+const VERSION='v0.11.30-bc'; // v0.11.30: iOS-Zoom-Review-Fixes (Code-Review high, 2026-07-14) + Skin-Default STRASSE (Holger: Straße ist jetzt Default, ?skin=geruest zeigt das Gerüst; bestehende ?skin=strasse-Links bleiben gültig). #1: Mehrfinger-touchstart-preventDefault jetzt BEDINGUNGSLOS — die v0.11.29-.btn-Ausnahme war nutzlos (alle Interaktionen laufen über Pointer-Events, von touchstart-preventDefault unberührt) und löchrig (::after-Halos +14px machten „knapp neben dem Button" zur Pinch-Lücke; WebKit-Text-Node-Targets brachen closest('.btn')). #2: Rettungsnetz — visualViewport.scale beobachtet; ist die Seite trotz Blocker gezoomt, werden alle Zoom-Blocker ausgesetzt (Pinch-out wieder möglich, vorher blockierten die eigenen Blocker den Rückweg) + Banner #zoomHint. #3: Gebäude-Tutorial 300ms-Schließ-Schutz (Zwei-Finger-Start-Tap: pointerdown #2 schloss das einmalige Tutorial sofort ungelesen; Wanduhr-Stempel buildTutOpenT, DEV_BUILD-sicher). #4: SHB-Box 1,2s-Entprellung (Zwei-Finger-Tap öffnete SHB_LINK doppelt → 2 Tabs/Popup-Blocker). Braucht echten iOS-Gerätetest (Pinch in Leerzone + langsamer Doppeltipp 350–500ms). — davor v0.11.29: iOS-Pinch-Zoom-Fix (großes iPhone), Erstfassung mit .btn-Ausnahme (durch #1 ersetzt). — davor v0.11.28: iOS-Long-Press-Fix — -webkit-user-select:none + -webkit-touch-callout:none auf .btn (Steuer-Buttons) und body; unterdrückt Callout/Lupe/Text-Selektion beim langen Halten der Touch-Controls auf iPhone (Holger-Report 2026-07-13). — davor v0.11.27: GLOBAL-EINREICHEN-Platzhalter im Game-Over-Screen hinter DEV_BUILD versteckt (Highscore = Sprint 2, reiner Text ohne Klick → im öffentlichen Build DEV_BUILD=false ausgeblendet; SHB-Box + „TIPPEN = NOCHMAL" bleiben). — davor v0.11.26 (Zusatz A6): iframe-Scroll-Fix — keydown-Handler (K-State) fängt die Steuertasten (Pfeile/Space/WASD) mit preventDefault ab, damit die Wirtsseite in der Wix-/iframe-Einbettung bei ↑/↓/Leertaste nicht mehr scrollt. keyup unverändert. — davor v0.11.25 (Sanft-Pass, E-138): Handy-Entschärfung. HAPPEN A (Balancing, Startwerte): MINGAP 1,2→1,35 s (A1) · HARDCAP 8→6, Fallback 7 (A2) · waveSize 3/4/5→2/3/4 (A3) · APP_SPEED Stand-Zone gedehnt 80/88/96, Max erst App 7 (A4) · Durchfall ab App 4 statt App 3 (A5). HAPPEN B (Handling/mobile Fairness, Startwerte): ◀/▶ auseinandergezogen (bL left 10→6, bR 86→150, neutrale Lücke + volle Trefferzonen) (B1) · Control-Scale-Floor 0,82 gegen zu kleine Buttons (B2) · JUMP in die freie Ecke gewachsen (B3) · Sprung-Puffer 120 ms + Coyote-Zeit 100 ms (B4). HANDY-JUSTAGE (Holger, 2026-07-11): ◀/▶-Lücke −50% (bR 150→110); Touch-Steuerung nur bei state==='play' sichtbar (im Menü/Game-Over/Win ausgeblendet). Alle Zahlen Startwerte — Endwerte via Handy-Playtest (Fremder, 1 Variable/Runde). — davor v0.11.24: Review-Cleanup — #5 landBelow-Helper (Lande-Detektion gapFall/ladderDrop/normal vereinheitlicht) + #6 drawShbLinkBox-Helper (SHB-Box Menue/Game-Over); reine Refactorings, Verhalten unveraendert. #3 (Klemm-Pass-Ausnahme) geprueft = NOETIG, kein Change. — davor v0.11.23: E-120b-Fix — Game-Over-SHB-Box-Tap ohne ±6-Puffer (Fehltipp am Boxrand öffnete SHB-URL statt Neustart; Review-Fund #1, bestätigt y433/y463). — davor v0.11.22: H5 „Savepoint-Rampe" — Leiter-Abfahrten mit Schutz F-5b (Telegraph 0,3 s + nie unter dem Spieler; Rampe App4 0,18/App5 0,30/App6+ 0,35; Sieg-Leiter ausgeschlossen; max 1 aktiv/Ebene + Cooldown; Leiter-Schalter save/win). E-Nr. via Felix. — davor v0.11.21: E-122 Straßen-Reskin (Version B via ?skin=strasse)
 const DEV_BUILD=false;     // v0.11.26 (Holger): für öffentlichen Embed auf false — blendet Dev-Versionsanzeige + Vorführ-Tafel (Taste D) aus. Für Entwicklung wieder true.
-// E-122 (Version B, Marketing/SHB: "Variante daneben"): Plattform-Optik per URL waehlbar — Baustellen-Geruest bleibt Default,
-// ?skin=strasse zeigt die Asphalt-Variante. Rein optisch: Layout/Kollision/Physik sind in beiden Skins identisch (Golden-Trace-Paritaet).
-const SKIN = new URLSearchParams(location.search).get('skin')==='strasse' ? 'strasse' : 'geruest';
+// E-122 (Version B, Marketing/SHB: "Variante daneben"): Plattform-Optik per URL waehlbar. v0.11.30 (Holger, 2026-07-14):
+// STRASSE ist jetzt Default (war Geruest), ?skin=geruest zeigt die Baustellen-Variante. Bestehende Links mit
+// ?skin=strasse (Embed/Demo/QR) bleiben gueltig (gleicher Wert). Rein optisch: Layout/Kollision/Physik identisch (Golden-Trace-Paritaet).
+const SKIN = new URLSearchParams(location.search).get('skin')==='geruest' ? 'geruest' : 'strasse';
 // E-120: SHB-Link (Start-/Game-Over-Screen). Ziel = SHB-Kundentag-Seite (Holger-Bestaetigung 2026-07-09). Falls E-110/Wix eine andere finale URL bringt: nur diese eine Zeile nachziehen.
 const SHB_LINK='https://www.shb-bs.com/kundentag'; // austauschbare Einzelstelle
 const SHB_LINK_LABEL='mehr zu SHB ▶'; // Anzeigetext der Link-Zeile
+let shbOpenT=0; // v0.11.30 (Review #4): Entprellung — Zwei-Finger-Tap auf die Box feuerte zwei pointerdown → window.open doppelt (2 Tabs bzw. Popup-Blocker-Leiste)
 let barrels=[], state='menu';
 let score=0, scoreAcc=0, level=1, lives=3;
 let act=0, cycle=0;       // E-023: Akt-System
@@ -384,6 +421,7 @@ let spawnHaltedNow=false;   // v0.9.2 (E-075): Live-Zustand Zielgerade (fürs St
 let hitFlash=0, winAnim=0, winBonus=0;
 let floaters=[];
 let buildTutTimer=0; // >0 = Gebäude-Tutorial-Popup aktiv
+let buildTutOpenT=0; // v0.11.30 (Review #3): Öffnungs-Zeitstempel (Wanduhr, NICHT buildTutTimer — der steht in DEV_BUILD still) — Schutz: Zwei-Finger-Start-Tap feuerte zwei pointerdown, #2 schloss das einmalige Tutorial ungelesen
 let buildTutShown=false; // nur einmal zeigen
 
 // Highscore + Loop-Count (E-028)
@@ -568,7 +606,7 @@ function initGame(){
   demoRun=false; // v0.11.13: normaler Start = kein Demo-Run (startDemoRun setzt es danach wieder)
   generateGaps(); // v0.9 (E-073/M1): frische Löcher pro Run (App 1 lochfrei)
   buildTutTimer=0; // v0.4.1 (CC#8): Tutorial-Popup nicht in frischen Run schleppen
-  if(!buildTutShown){ buildTutTimer=7.0; buildTutShown=true; spawnFreeze=Math.max(spawnFreeze,buildTutTimer); } // v0.11.1: 4,0→7,0 s lesbar + per Tipp schließbar; Spawns solange einfrieren
+  if(!buildTutShown){ buildTutTimer=7.0; buildTutShown=true; buildTutOpenT=performance.now(); spawnFreeze=Math.max(spawnFreeze,buildTutTimer); } // v0.11.1: 4,0→7,0 s lesbar + per Tipp schließbar; Spawns solange einfrieren
   state='play';
 }
 function resetPlayer(){
@@ -581,7 +619,7 @@ function nextAct(){
   // E-023: 3 Akte zyklisch
   act=(act+1)%3;
   if(act===0){ cycle++; buildLoops++;
-    if(!buildTutShown){buildTutTimer=7.0;buildTutShown=true;} // v0.11.1: Tutorial einmal, 7 s, schließbar
+    if(!buildTutShown){buildTutTimer=7.0;buildTutShown=true;buildTutOpenT=performance.now();} // v0.11.1: Tutorial einmal, 7 s, schließbar
   }
   level++; // bewusst ohne Anzeige (CC-Review #3): interner Score-Multiplikator (pts×level, winBonus, scoreAcc) — HUD-Zeile trägt seit E-095 App/Feature
   // v0.11.1 (E-097, Holger-Modell): 3 Stufen (PROTOTYP→BETA→LIVE) = 1 Feature; Features füllen die App (Rampe appFeatsNeeded)
@@ -1663,7 +1701,7 @@ window.addEventListener('keydown',e=>{
   if(e.code==='KeyB'){ barrelLetters=!barrelLetters; return; } // v0.10.3 (E-088): Fass-Letter an/aus
   if(DEV_BUILD&&e.code==='KeyD'){ demoOpen=!demoOpen; return; } // v0.11.13: Vorfuehr-Modus auf/zu (Desktop)
   if(demoOpen){ if(e.code==='Escape') demoOpen=false; return; } // v0.11.13: Tafel offen → Tasten schlucken (kein verstecktes Start/Restart)
-  if(state==='play'&&buildTutTimer>0&&(e.code==='Space'||e.code==='Enter')){ buildTutTimer=0; spawnFreeze=Math.min(spawnFreeze,0.8); return; } // v0.11.1: Popup auch per Taste schließbar
+  if(state==='play'&&buildTutTimer>0&&(e.code==='Space'||e.code==='Enter')){ if(performance.now()-buildTutOpenT>300) { buildTutTimer=0; spawnFreeze=Math.min(spawnFreeze,0.8); } return; } // v0.11.1: Popup auch per Taste schließbar; v0.11.30 (Review #3): 300ms-Schutz gegen Key-Repeat des Start-Space
   if(state==='winanim'&&DEV_BUILD&&(e.code==='Space'||e.code==='Enter')){ nextAct(); return; } // v0.11.2: DEV — Win-Screen per Taste weiter
   if(e.code==='Space'||e.code==='Enter') startOrRestart();
 });
@@ -1677,7 +1715,9 @@ cv.addEventListener('pointerdown',e=>{ // v0.10 (E-067): erst Sound-Button-Hit-T
   // SHB-URL statt Neustart (bestätigt y433/y463). Auf dem Menü (Platz genug) bleibt ±6 wie SND_BOX.
   const shbPad=(state==='over')?0:6;
   if((state==='menu'||state==='over') && gx>=SHB_BOX.x&&gx<=SHB_BOX.x+SHB_BOX.w && gy>=SHB_BOX.y-shbPad&&gy<=SHB_BOX.y+SHB_BOX.h+shbPad){
-    window.open(SHB_LINK,'_blank','noopener'); return; // Menü ±6 wie SND_BOX / Game-Over 0; return = kein Spielstart
+    const nw=Date.now(); // v0.11.30 (Review #4): 1,2s-Entprellung gegen Doppel-open beim Zwei-Finger-Tap (ein pointerdown pro Finger)
+    if(nw-shbOpenT>1200){ shbOpenT=nw; window.open(SHB_LINK,'_blank','noopener'); }
+    return; // Menü ±6 wie SND_BOX / Game-Over 0; return = kein Spielstart
   }
   // v0.11.13 (Vorfuehr-Modus, nur DEV): erst Tafel-Zeilen, dann DEMO-Button — vor allen Start-/Weiter-Handlern
   if(DEV_BUILD){
@@ -1691,7 +1731,7 @@ cv.addEventListener('pointerdown',e=>{ // v0.10 (E-067): erst Sound-Button-Hit-T
     }
     if(gx>=DEMO_BOX.x-6&&gx<=DEMO_BOX.x+DEMO_BOX.w+6&&gy>=DEMO_BOX.y-6&&gy<=DEMO_BOX.y+DEMO_BOX.h+6){ demoOpen=true; return; }
   }
-  if(state==='play'&&buildTutTimer>0){ buildTutTimer=0; spawnFreeze=Math.min(spawnFreeze,0.8); return; } // v0.11.1: Popup per Tipp schließbar (Holger), kurzer Rest-Freeze fürs Banner
+  if(state==='play'&&buildTutTimer>0){ if(performance.now()-buildTutOpenT>300) { buildTutTimer=0; spawnFreeze=Math.min(spawnFreeze,0.8); } return; } // v0.11.1: Popup per Tipp schließbar (Holger), kurzer Rest-Freeze fürs Banner; v0.11.30 (Review #3): 300ms-Schutz — beim Zwei-Finger-Start-Tap schloss pointerdown #2 das einmalige Tutorial sofort ungelesen
   if(state==='winanim'&&DEV_BUILD){ nextAct(); return; } // v0.11.2: DEV — Win-Screen per Tipp weiter
   startOrRestart();
 });
