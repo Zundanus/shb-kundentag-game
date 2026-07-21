@@ -215,11 +215,17 @@ const C = {
 // --- Barrel-Typen (E-018, E-019) ---
 const BARREL_TYPES = {
   // v0.9 (E-073/M2): Vibe-Gewichte (mehr Typen-Mix) + Typ-Tempo spd (wertvoll = schneller, Risk/Reward)
-  bug:         { pts:5,  color:'#cc2200', label:'BUG', weight:36, spd:1.0  },
-  config:      { pts:10, color:'#7a8a9a', label:'CFG', weight:24, spd:1.08 },
-  anforderung: { pts:20, color:'#4a9fd4', label:'ANF', weight:18, spd:1.18 },
-  entwicklung: { pts:30, color:'#7c3aed', label:'DEV', weight:12, spd:1.32 },
-  schulung:    { pts:50, color:'#f5c400', label:'SCH', weight:8,  spd:1.4  }, // v0.9.1 (E-074): 1,5→1,4 — Holger: "echt HART" (232→217 px/s in Akt 3)
+  // v0.11.32/33 (Score-Balance, Holger): pts insgesamt ×6 gegenueber dem Ur-Stand (5/10/20/30/50 → v0.11.32 ×4
+  // → v0.11.33 nochmal ×1,5 = 30/60/120/180/300). Das Ueberspringen war die einzige Risiko-Aktion im Spiel
+  // (kostet ein Leben bei Fehlschlag), aber die kleinste Punktequelle: ein Bug-Fass entsprach urspruenglich
+  // 0,5 s Rumstehen (pts*level vs. Zeit-Score 10*level/s) — optimales Spiel hiess also "Faessern ausweichen".
+  // Die Verhaeltnisse 1:2:4:6:10 bleiben exakt erhalten, damit die Risk/Reward-Staffel (wertvoll = schneller, spd)
+  // und die Spawn-Gewichte unangetastet weiterwirken. Gewicht/spd = Sanft-Pass-Tuning, NICHT anfassen.
+  bug:         { pts:30,  color:'#cc2200', label:'BUG', weight:36, spd:1.0  },
+  config:      { pts:60,  color:'#7a8a9a', label:'CFG', weight:24, spd:1.08 },
+  anforderung: { pts:120, color:'#4a9fd4', label:'ANF', weight:18, spd:1.18 },
+  entwicklung: { pts:180, color:'#7c3aed', label:'DEV', weight:12, spd:1.32 },
+  schulung:    { pts:300, color:'#f5c400', label:'SCH', weight:8,  spd:1.4  }, // v0.9.1 (E-074): 1,5→1,4 — Holger: "echt HART" (232→217 px/s in Akt 3)
 };
 // v0.11.2 (Holger): ausgeschriebene Typ-Namen — Fass-Schreibweise überall wie im Startschirm
 const NAME_FULL={bug:'BUG',config:'CONFIG',anforderung:'ANFORDERUNG',entwicklung:'ENTWICKLUNG',schulung:'SCHULUNG'};
@@ -410,7 +416,7 @@ const P={
 };
 
 // --- Game state ---
-const VERSION='v0.11.31-bc'; // v0.11.31: Adaptive Touch-Steuerung (Holger: Surface-Kollegen sahen am Desktop-Edge den Handy-Modus). Touch-faehige Desktops (maxTouchPoints>0) bekamen bisher immer die Buttonleiste. Neu: Startwert = touch-faehig UND pointer:coarse (Surface mit Type Cover startet als Desktop, Tablet-Modus/Handy mit Buttons); zur Laufzeit folgt das UI der Eingabe — Finger-Tap (pointerType==='touch', capture) blendet die Buttons ein, Steuertaste (GAME_KEYS im keydown) blendet sie aus; jeder Wechsel ruft resize() (54px-Boden-Reserve + Leisten-Hoehe haengen an isTouch), syncCtrlVis prueft isTouch jetzt in der show-Bedingung statt early-return (Buttons muessen beim Wechsel auch verschwinden). Braucht Gegentest auf echtem Surface + Handy (iPhone unveraendert: coarse=true). — davor v0.11.30: iOS-Zoom-Review-Fixes (Code-Review high, 2026-07-14) + Skin-Default STRASSE (Holger: Straße ist jetzt Default, ?skin=geruest zeigt das Gerüst; bestehende ?skin=strasse-Links bleiben gültig). #1: Mehrfinger-touchstart-preventDefault jetzt BEDINGUNGSLOS — die v0.11.29-.btn-Ausnahme war nutzlos (alle Interaktionen laufen über Pointer-Events, von touchstart-preventDefault unberührt) und löchrig (::after-Halos +14px machten „knapp neben dem Button" zur Pinch-Lücke; WebKit-Text-Node-Targets brachen closest('.btn')). #2: Rettungsnetz — visualViewport.scale beobachtet; ist die Seite trotz Blocker gezoomt, werden alle Zoom-Blocker ausgesetzt (Pinch-out wieder möglich, vorher blockierten die eigenen Blocker den Rückweg) + Banner #zoomHint. #3: Gebäude-Tutorial 300ms-Schließ-Schutz (Zwei-Finger-Start-Tap: pointerdown #2 schloss das einmalige Tutorial sofort ungelesen; Wanduhr-Stempel buildTutOpenT, DEV_BUILD-sicher). #4: SHB-Box 1,2s-Entprellung (Zwei-Finger-Tap öffnete SHB_LINK doppelt → 2 Tabs/Popup-Blocker). Braucht echten iOS-Gerätetest (Pinch in Leerzone + langsamer Doppeltipp 350–500ms). — davor v0.11.29: iOS-Pinch-Zoom-Fix (großes iPhone), Erstfassung mit .btn-Ausnahme (durch #1 ersetzt). — davor v0.11.28: iOS-Long-Press-Fix — -webkit-user-select:none + -webkit-touch-callout:none auf .btn (Steuer-Buttons) und body; unterdrückt Callout/Lupe/Text-Selektion beim langen Halten der Touch-Controls auf iPhone (Holger-Report 2026-07-13). — davor v0.11.27: GLOBAL-EINREICHEN-Platzhalter im Game-Over-Screen hinter DEV_BUILD versteckt (Highscore = Sprint 2, reiner Text ohne Klick → im öffentlichen Build DEV_BUILD=false ausgeblendet; SHB-Box + „TIPPEN = NOCHMAL" bleiben). — davor v0.11.26 (Zusatz A6): iframe-Scroll-Fix — keydown-Handler (K-State) fängt die Steuertasten (Pfeile/Space/WASD) mit preventDefault ab, damit die Wirtsseite in der Wix-/iframe-Einbettung bei ↑/↓/Leertaste nicht mehr scrollt. keyup unverändert. — davor v0.11.25 (Sanft-Pass, E-138): Handy-Entschärfung. HAPPEN A (Balancing, Startwerte): MINGAP 1,2→1,35 s (A1) · HARDCAP 8→6, Fallback 7 (A2) · waveSize 3/4/5→2/3/4 (A3) · APP_SPEED Stand-Zone gedehnt 80/88/96, Max erst App 7 (A4) · Durchfall ab App 4 statt App 3 (A5). HAPPEN B (Handling/mobile Fairness, Startwerte): ◀/▶ auseinandergezogen (bL left 10→6, bR 86→150, neutrale Lücke + volle Trefferzonen) (B1) · Control-Scale-Floor 0,82 gegen zu kleine Buttons (B2) · JUMP in die freie Ecke gewachsen (B3) · Sprung-Puffer 120 ms + Coyote-Zeit 100 ms (B4). HANDY-JUSTAGE (Holger, 2026-07-11): ◀/▶-Lücke −50% (bR 150→110); Touch-Steuerung nur bei state==='play' sichtbar (im Menü/Game-Over/Win ausgeblendet). Alle Zahlen Startwerte — Endwerte via Handy-Playtest (Fremder, 1 Variable/Runde). — davor v0.11.24: Review-Cleanup — #5 landBelow-Helper (Lande-Detektion gapFall/ladderDrop/normal vereinheitlicht) + #6 drawShbLinkBox-Helper (SHB-Box Menue/Game-Over); reine Refactorings, Verhalten unveraendert. #3 (Klemm-Pass-Ausnahme) geprueft = NOETIG, kein Change. — davor v0.11.23: E-120b-Fix — Game-Over-SHB-Box-Tap ohne ±6-Puffer (Fehltipp am Boxrand öffnete SHB-URL statt Neustart; Review-Fund #1, bestätigt y433/y463). — davor v0.11.22: H5 „Savepoint-Rampe" — Leiter-Abfahrten mit Schutz F-5b (Telegraph 0,3 s + nie unter dem Spieler; Rampe App4 0,18/App5 0,30/App6+ 0,35; Sieg-Leiter ausgeschlossen; max 1 aktiv/Ebene + Cooldown; Leiter-Schalter save/win). E-Nr. via Felix. — davor v0.11.21: E-122 Straßen-Reskin (Version B via ?skin=strasse)
+const VERSION='v0.11.34-bc'; // v0.11.34: SERIEN-BONUS (Holger 2026-07-22) — Fass-Spruenge in Folge geben einen Multiplikator. Zweck: nicht "mehr Punkte", sondern Spreizung der Kundentag-Highscore-Liste (der Score war fast linear zur Spielzeit, das komprimiert das Teilnehmerfeld) + staerkerer Zug im Moment ("ich habe x3 stehen"). Mechanik: combo zaehlt uebersprungene Faesser, Multiplikator = min(5, 1+floor(combo/5)), Punkte = pts*level*m. Reset AUSSCHLIESSLICH beim Tod (einzige Todesstelle im Spiel = Fass-Kollision; Durchfallen toetet nicht, P0 faengt immer) — bewusst KEIN Zeitfenster (haette gegen die absichtlich weite Fass-Taktung des Sanft-Pass E-138 gearbeitet und die Handy-Entschaerfung zurueckgedreht) und KEIN Reset beim Aktwechsel (Serie ueber Akte halten = der Reiz). Damit aendert die Serie an der Schwierigkeit nichts, sie hebt nur die Decke. Anzeige: HUD-Zeile "SERIE n xM" zwischen Score und Leben (ab M>1 gelb, Stufenaufstieg blitzt kurz groesser + neuer Sound 'combo'), Floater "+90 BUG x3", Game-Over "BESTE SERIE: n" in der leeren Zone y196 (Statblock ab y220 unberuehrt, E-120b-Historie). Uebrige Score-Werte bewusst UNVERAENDERT gelassen (Zeit-Bonus bleibt drin: fuer starke Laeufe ohnehin ~1%, fuer schwache das Einzige was hochzaehlt). Startwerte 5er-Schwelle/Deckel 5 — Endwerte via Playtest, Nachsteuern zuerst am Deckel, nicht an den Basiswerten. Kanon-E-Nummer noch zu vergeben (R-055). — davor v0.11.33: Score-Balance Runde 2 (Holger 2026-07-22) — Nachjustierung von v0.11.32: ① Level-/Akt-Sieg-Bonus wieder HALBIERT (2000+level*400 → zurueck auf 1000+level*200), damit der einzelne Aufstieg nicht mit dem App-Abschluss konkurriert; ② NEU: App-Bonus 2500*level beim Ausliefern einer App — bis hierher gab der App-Abschluss NULL Punkte (nur Sound+Banner), obwohl die fertige App der Kopf-Meilenstein ist (HUD "APPS", Game-Over "APPS LIVE"); jetzt der groesste Einzelbetrag im Spiel (App 1 ~10.000 · App 2 ~25.000 · App 3 ~47.500), sichtbar im "APP RELEASED! +X"-Banner; ③ Zeit-Score weiter runter 5→2,5 Punkte/s (gegenueber Ur-Stand geviertelt, bewusst nicht gestrichen — tickt bei level 1 noch ~alle 0,4 s sichtbar); ④ Fass-pts nochmal ×1,5 → 30/60/120/180/300 (insgesamt ×6 gegenueber Ur-Stand, Verhaeltnisse 1:2:4:6:10 und damit spd/weight unveraendert). Netto ggue. Ur-Stand: ein Bug-Fass = 12 s Rumstehen statt 0,5 s. Ebenen-Bonus unveraendert bei pi*400 (v0.11.32). Schwierigkeit/Spawn/Physik weiterhin unangetastet (Sanft-Pass E-138 gilt). Kanon-E-Nummer noch zu vergeben (R-055). — davor v0.11.32: Score-Balance (Holger 2026-07-22) — Fass-Punkte waren gegenueber dem passiven Zeit-Score zu gering. Analyse: Fassspruenge = ~5% eines Akt-Scores, ein Bug-Fass = 0,5 s Rumstehen (beide skalieren mit level, Verhaeltnis also konstant) → optimales Spiel war "Faessern ausweichen", obwohl der Sprung die einzige Risiko-Aktion ist. Vier Stellschrauben: ① BARREL_TYPES pts ×4 (20/40/80/120/200, Verhaeltnisse 1:2:4:6:10 und damit Risk/Reward-spd + Spawn-Gewichte unveraendert); ② Ebenen-Bonus ×2 (pi*200→pi*400 = 400/800/1200 pro Aufstieg, weiter ohne level-Faktor); ③ Akt-Sieg ×2 (1000+level*200 → 2000+level*400); ④ passiver Zeit-Score 10→5 Punkte/s (halbiert, bewusst NICHT gestrichen — Holger: gibt auch schwachen Laeufen ein Erfolgsgefuehl). Netto: ein Bug-Fass entspricht jetzt 4 s Rumstehen statt 0,5 s, Faesser gewinnen 8× gegenueber Zeit und 2× gegenueber Ebenen/Sieg. Schwierigkeit/Spawn/Physik unangetastet (Sanft-Pass E-138 bleibt gueltig). Kanon-E-Nummer noch zu vergeben (R-055: nicht selbst nummerieren). — davor v0.11.31: Adaptive Touch-Steuerung (Holger: Surface-Kollegen sahen am Desktop-Edge den Handy-Modus). Touch-faehige Desktops (maxTouchPoints>0) bekamen bisher immer die Buttonleiste. Neu: Startwert = touch-faehig UND pointer:coarse (Surface mit Type Cover startet als Desktop, Tablet-Modus/Handy mit Buttons); zur Laufzeit folgt das UI der Eingabe — Finger-Tap (pointerType==='touch', capture) blendet die Buttons ein, Steuertaste (GAME_KEYS im keydown) blendet sie aus; jeder Wechsel ruft resize() (54px-Boden-Reserve + Leisten-Hoehe haengen an isTouch), syncCtrlVis prueft isTouch jetzt in der show-Bedingung statt early-return (Buttons muessen beim Wechsel auch verschwinden). Braucht Gegentest auf echtem Surface + Handy (iPhone unveraendert: coarse=true). — davor v0.11.30: iOS-Zoom-Review-Fixes (Code-Review high, 2026-07-14) + Skin-Default STRASSE (Holger: Straße ist jetzt Default, ?skin=geruest zeigt das Gerüst; bestehende ?skin=strasse-Links bleiben gültig). #1: Mehrfinger-touchstart-preventDefault jetzt BEDINGUNGSLOS — die v0.11.29-.btn-Ausnahme war nutzlos (alle Interaktionen laufen über Pointer-Events, von touchstart-preventDefault unberührt) und löchrig (::after-Halos +14px machten „knapp neben dem Button" zur Pinch-Lücke; WebKit-Text-Node-Targets brachen closest('.btn')). #2: Rettungsnetz — visualViewport.scale beobachtet; ist die Seite trotz Blocker gezoomt, werden alle Zoom-Blocker ausgesetzt (Pinch-out wieder möglich, vorher blockierten die eigenen Blocker den Rückweg) + Banner #zoomHint. #3: Gebäude-Tutorial 300ms-Schließ-Schutz (Zwei-Finger-Start-Tap: pointerdown #2 schloss das einmalige Tutorial sofort ungelesen; Wanduhr-Stempel buildTutOpenT, DEV_BUILD-sicher). #4: SHB-Box 1,2s-Entprellung (Zwei-Finger-Tap öffnete SHB_LINK doppelt → 2 Tabs/Popup-Blocker). Braucht echten iOS-Gerätetest (Pinch in Leerzone + langsamer Doppeltipp 350–500ms). — davor v0.11.29: iOS-Pinch-Zoom-Fix (großes iPhone), Erstfassung mit .btn-Ausnahme (durch #1 ersetzt). — davor v0.11.28: iOS-Long-Press-Fix — -webkit-user-select:none + -webkit-touch-callout:none auf .btn (Steuer-Buttons) und body; unterdrückt Callout/Lupe/Text-Selektion beim langen Halten der Touch-Controls auf iPhone (Holger-Report 2026-07-13). — davor v0.11.27: GLOBAL-EINREICHEN-Platzhalter im Game-Over-Screen hinter DEV_BUILD versteckt (Highscore = Sprint 2, reiner Text ohne Klick → im öffentlichen Build DEV_BUILD=false ausgeblendet; SHB-Box + „TIPPEN = NOCHMAL" bleiben). — davor v0.11.26 (Zusatz A6): iframe-Scroll-Fix — keydown-Handler (K-State) fängt die Steuertasten (Pfeile/Space/WASD) mit preventDefault ab, damit die Wirtsseite in der Wix-/iframe-Einbettung bei ↑/↓/Leertaste nicht mehr scrollt. keyup unverändert. — davor v0.11.25 (Sanft-Pass, E-138): Handy-Entschärfung. HAPPEN A (Balancing, Startwerte): MINGAP 1,2→1,35 s (A1) · HARDCAP 8→6, Fallback 7 (A2) · waveSize 3/4/5→2/3/4 (A3) · APP_SPEED Stand-Zone gedehnt 80/88/96, Max erst App 7 (A4) · Durchfall ab App 4 statt App 3 (A5). HAPPEN B (Handling/mobile Fairness, Startwerte): ◀/▶ auseinandergezogen (bL left 10→6, bR 86→150, neutrale Lücke + volle Trefferzonen) (B1) · Control-Scale-Floor 0,82 gegen zu kleine Buttons (B2) · JUMP in die freie Ecke gewachsen (B3) · Sprung-Puffer 120 ms + Coyote-Zeit 100 ms (B4). HANDY-JUSTAGE (Holger, 2026-07-11): ◀/▶-Lücke −50% (bR 150→110); Touch-Steuerung nur bei state==='play' sichtbar (im Menü/Game-Over/Win ausgeblendet). Alle Zahlen Startwerte — Endwerte via Handy-Playtest (Fremder, 1 Variable/Runde). — davor v0.11.24: Review-Cleanup — #5 landBelow-Helper (Lande-Detektion gapFall/ladderDrop/normal vereinheitlicht) + #6 drawShbLinkBox-Helper (SHB-Box Menue/Game-Over); reine Refactorings, Verhalten unveraendert. #3 (Klemm-Pass-Ausnahme) geprueft = NOETIG, kein Change. — davor v0.11.23: E-120b-Fix — Game-Over-SHB-Box-Tap ohne ±6-Puffer (Fehltipp am Boxrand öffnete SHB-URL statt Neustart; Review-Fund #1, bestätigt y433/y463). — davor v0.11.22: H5 „Savepoint-Rampe" — Leiter-Abfahrten mit Schutz F-5b (Telegraph 0,3 s + nie unter dem Spieler; Rampe App4 0,18/App5 0,30/App6+ 0,35; Sieg-Leiter ausgeschlossen; max 1 aktiv/Ebene + Cooldown; Leiter-Schalter save/win). E-Nr. via Felix. — davor v0.11.21: E-122 Straßen-Reskin (Version B via ?skin=strasse)
 const DEV_BUILD=false;     // v0.11.26 (Holger): für öffentlichen Embed auf false — blendet Dev-Versionsanzeige + Vorführ-Tafel (Taste D) aus. Für Entwicklung wieder true.
 // E-122 (Version B, Marketing/SHB: "Variante daneben"): Plattform-Optik per URL waehlbar. v0.11.30 (Holger, 2026-07-14):
 // STRASSE ist jetzt Default (war Geruest), ?skin=geruest zeigt die Baustellen-Variante. Bestehende Links mit
@@ -422,6 +428,18 @@ const SHB_LINK_LABEL='mehr zu SHB ▶'; // Anzeigetext der Link-Zeile
 let shbOpenT=0; // v0.11.30 (Review #4): Entprellung — Zwei-Finger-Tap auf die Box feuerte zwei pointerdown → window.open doppelt (2 Tabs bzw. Popup-Blocker-Leiste)
 let barrels=[], state='menu';
 let score=0, scoreAcc=0, level=1, lives=3;
+// v0.11.34 (Serien-Bonus, Holger): Serie = uebersprungene Faesser in Folge. Multiplikator steigt alle
+// COMBO_STEP Faesser um 1, gedeckelt bei COMBO_MAX. Reset AUSSCHLIESSLICH beim Tod — bewusst KEIN Zeitfenster:
+// der Sanft-Pass (E-138) hat die Faesser absichtlich auseinandergezogen (MINGAP 1,35 s + Wellenpause), ein
+// Zeit-Combo wuerde genau diese faire Taktung bestrafen und die Handy-Entschaerfung zurueckdrehen. So bewertet
+// die Serie nur, was ohnehin passiert — sie aendert an der Schwierigkeit nichts, hebt aber die Score-Decke
+// (= Spreizung fuer die Kundentag-Highscore-Liste). Auch KEIN Reset beim Aktwechsel: die Serie ueber mehrere
+// Akte zu halten ist der eigentliche Reiz. Startwerte 5/5 — Endwerte via Playtest.
+const COMBO_STEP=5, COMBO_MAX=5;
+let combo=0;       // laufende Serie
+let comboBest=0;   // beste Serie im Run (Game-Over-Anzeige)
+let comboFlash=0;  // >0: Stufenaufstieg blinkt kurz im HUD
+const comboMult=()=>Math.min(COMBO_MAX, 1+Math.floor(combo/COMBO_STEP));
 let act=0, cycle=0;       // E-023: Akt-System
 let spawnT=1.5, spawnI=2.8; // Erstes Fass nach 1.5s
 let spawnFreeze=1.5;        // Spawn-Freeze Countdown
@@ -447,6 +465,7 @@ try { HS_LOOPS=+localStorage.getItem('shb_bc_loops')||0; } catch(e){HS_LOOPS=0;}
 let appsShipped=0;   // fertige Apps im aktuellen Run
 let featsIntoApp=0;  // v0.11.1 (E-097, Holger-Modell): fertige Features in der aktuellen App — 1 Feature = 3 Stufen (PROTOTYP→BETA→LIVE)
 let appDoneTimer=0;  // >0 = "APP FERTIG"-Moment sichtbar
+let appBonusLast=0;  // v0.11.33: zuletzt vergebener App-Bonus — nur fuer die Anzeige im "APP RELEASED!"-Banner
 let HS_APPS;
 const appFeatsNeeded=()=>Math.min(3, 1+appsShipped); // v0.11.1 (E-097/Milo): App-Rampe in FEATURES — App 1 = 1, App 2 = 2, ab App 3 = 3 (erste App weiter nach 3 Aufstiegen = Booth-Pacing E-073 unverändert)
 try { HS_APPS=+localStorage.getItem('shb_bc_apps')||0; } catch(e){HS_APPS=0;}
@@ -478,6 +497,7 @@ function sfx(n){ // alle Pegel bewusst leise (Messe-Stand!)
     case 'over':    tone(392,0,0.14,'triangle',0.06); tone(311,0,0.14,'triangle',0.06,0.14); tone(233,0,0.3,'triangle',0.06,0.28); break;
     case 'win':     tone(392,0,0.11,'square',0.045); tone(523,0,0.11,'square',0.045,0.11); tone(659,0,0.2,'square',0.05,0.22); break;
     case 'appdone': tone(523,0,0.09,'square',0.045); tone(659,0,0.09,'square',0.045,0.09); tone(784,0,0.09,'square',0.045,0.18); tone(1047,0,0.16,'square',0.05,0.27); break;
+    case 'combo':   tone(784,0,0.07,'square',0.05); tone(1047,0,0.11,'square',0.05,0.07); break; // v0.11.34: Serien-Stufe — steigendes Paar, klar von 'bonus' (Sinus) unterscheidbar, Pegel wie der Rest (Messe!)
     case 'stop':    tone(150,70,0.16,'square',0.055); break;
     case 'start':   tone(330,660,0.1,'square',0.045); break;
   }
@@ -613,8 +633,9 @@ function landBelow(b, dt, maxPi){
 function initGame(){
   resetPlayer(); barrels=[]; ladderCD.fill(0); // H5: Leiter-Cooldowns frisch pro Run
   act=0; cycle=0; buildLoops=0;
-  appsShipped=0; featsIntoApp=0; appDoneTimer=0; // v0.5-bc (A1): App-Fortschritt frisch
+  appsShipped=0; featsIntoApp=0; appDoneTimer=0; appBonusLast=0; // v0.5-bc (A1): App-Fortschritt frisch; v0.11.33: App-Bonus-Anzeige mit zuruecksetzen
   score=0; scoreAcc=0; hitFlash=0; winAnim=0; floaters=[];
+  combo=0; comboBest=0; comboFlash=0; // v0.11.34: Serie frisch pro Run
   spawnFreeze=1.5; spawnT=1.5; spawnI=actSpawnI();
   moveStarted=false; lastSpawn=null; pendingWave=0; wavePauseT=0; spawnStopped=false; // v0.8 (E-072): Zyklus/Welle frisch
   demoRun=false; // v0.11.13: normaler Start = kein Demo-Run (startDemoRun setzt es danach wieder)
@@ -638,7 +659,15 @@ function nextAct(){
   level++; // bewusst ohne Anzeige (CC-Review #3): interner Score-Multiplikator (pts×level, winBonus, scoreAcc) — HUD-Zeile trägt seit E-095 App/Feature
   // v0.11.1 (E-097, Holger-Modell): 3 Stufen (PROTOTYP→BETA→LIVE) = 1 Feature; Features füllen die App (Rampe appFeatsNeeded)
   if(act===0){ featsIntoApp++;
-    if(featsIntoApp >= appFeatsNeeded()){ appsShipped++; featsIntoApp=0; appDoneTimer=1.8; sfx('appdone'); }
+    if(featsIntoApp >= appFeatsNeeded()){ appsShipped++; featsIntoApp=0; appDoneTimer=1.8; sfx('appdone');
+      // v0.11.33 (Holger: "pro App die Punktzahl anheben"): Bis v0.11.32 gab der App-Abschluss NULL Punkte — nur
+      // Sound + Banner. Dabei ist die fertige App der Kopf-Meilenstein des Spiels (HUD "APPS", Game-Over "APPS LIVE").
+      // Jetzt der groesste Einzelbetrag im Spiel. level-skaliert wie alle anderen Boni, damit er spaet nicht verblasst —
+      // und das passt zur App-Rampe appFeatsNeeded (App 1 = 1 Feature = 3 Akte, App 2 = 2, ab App 3 = 3 Features = 9 Akte):
+      // weil level pro Akt steigt, waechst der Bonus automatisch mit dem groesseren Aufwand mit.
+      // Groessenordnung: App 1 ~level 4 = 10.000 · App 2 ~level 10 = 25.000 · App 3 ~level 19 = 47.500. Startwert — Playtest.
+      appBonusLast = 2500*level; score += appBonusLast;
+    }
   }
   resetPlayer(); barrels=[]; ladderCD.fill(0); // H5: Leiter-Cooldowns pro Akt neu
   spawnFreeze=1.2; spawnT=1.2; spawnI=actSpawnI(); // v0.5.3: kuerzere Pause -> keine leeren Akte
@@ -758,7 +787,7 @@ function updatePlayer(dt){
         P.y=p.y-P.h;P.vy=0;P.onGround=true;
         if(pi>0&&pi>P.highestPlat){
           P.highestPlat=pi;
-          if(pi<4){const b=pi*200;score+=b;addFloat(P.x+P.w/2,P.y-8,'+'+b);sfx('plat');}
+          if(pi<4){const b=pi*400;score+=b;addFloat(P.x+P.w/2,P.y-8,'+'+b);sfx('plat');} // v0.11.32 (Score-Balance): Ebenen-Bonus ×2 (200→400 je Stufe = 400/800/1200 pro Aufstieg). Bewusst OHNE level-Faktor: bleibt eine feste Fortschritts-Belohnung, die frueh grosszuegig wirkt (Glueckserlebnis fuer schwaechere Spieler) und spaet anteilig zurueckfaellt, sodass in hohen Loops Faesser+Zeit den Ausschlag geben.
         }
         break;
       }
@@ -774,7 +803,7 @@ function updatePlayer(dt){
   }
   // v0.9 (E-073/M3): Sieg = Berührung der MAN-Box des SHB-Kollegen (vereinheitlicht mit Vibe; E-072-Gate bleibt)
   if(state==='play' && P.onGround && P.highestPlat>=4 && P.x+P.w>=WIN_BOX.x && P.x<=WIN_BOX.x+WIN_BOX.w){
-    winBonus=1000+level*200; score+=winBonus;
+    winBonus=1000+level*200; score+=winBonus; // v0.11.33 (Holger): Level-/Akt-Bonus wieder halbiert (v0.11.32 hatte auf 2000+level*400 verdoppelt) — der einzelne Aufstieg soll nicht mit dem App-Abschluss konkurrieren; der grosse Meilenstein ist die fertige App (appBonus in nextAct)
     // v0.11.5 (E-100/Lena D-Nachtrag #1): Floater hier entfernt — fror waehrend winanim
     // eingefroren bei voller Deckkraft ein (Lebensdauer laeuft nur im state==='play'-Zweig
     // herunter) und schimmerte als Geist-Text hinter der Win-Karten-Vorschau durch. Die
@@ -789,8 +818,12 @@ function updatePlayer(dt){
   P.frameT+=dt;
   if(P.frameT>0.13){P.frame=(P.frame+1)%4;P.frameT=0;}
   // Passiver Zeit-Score nur außerhalb der Spawn-Freeze (sonst Gratis-Punkte bei unverwundbarem Stillstand im Akt-Intro/Respawn)
+  // v0.11.32/33 (Score-Balance, Holger): 10 → 5 → 2,5 Punkte/s, also insgesamt geviertelt — aber bewusst NICHT
+  // gestrichen. Der Zeit-Score bleibt drin, weil er auch schwachen Laeufen ein stetig steigendes Zaehlwerk
+  // (= Erfolgsgefuehl) gibt; bei 2,5/s tickt der Score bei level 1 noch ~alle 0,4 s sichtbar hoch. Er soll nur
+  // nicht mehr die Haupt-Punktequelle sein: zusammen mit pts ×6 kostet ein Bug-Fass jetzt 12 s Rumstehen statt 0,5 s.
   if(spawnFreeze<=0){
-    scoreAcc+=dt*10*level;
+    scoreAcc+=dt*2.5*level;
     const pts=scoreAcc|0;
     if(pts>0){score+=pts;scoreAcc-=pts;}
   }
@@ -903,6 +936,7 @@ function updateBarrels(dt){
     // Kollision
     if(!P.dead&&b.x+b.w-7>P.x+3&&b.x+7<P.x+P.w-3&&b.y+b.h-4>P.y+5&&b.y+4<P.y+P.h-2){ // v0.4.2 (T-4): Trefferbox enger
       P.dead=true;P.deathTimer=0.9;hitFlash=0.7;shake=0.28;sfx('death');
+      combo=0; comboFlash=0; // v0.11.34: einzige Stelle, an der die Serie reisst (Durchfallen durch Loecher toetet nicht — P0 faengt immer)
       barrels.splice(i,1);continue;
     }
 
@@ -911,9 +945,16 @@ function updateBarrels(dt){
       const bCx=b.x+b.w/2, pCx=P.x+P.w/2;
       if(Math.abs(bCx-pCx)<40&&b.y>=P.y+P.h-8&&b.y<=P.y+P.h+50){ // v0.4.2 (CC#6): Band weit genug fuer echte Spruenge, blockt aber Ebene tiefer (~90px)
         b.jumpScored=true;
-        const jp=BARREL_TYPES[b.type].pts*level;
+        // v0.11.34 (Serien-Bonus): erst hochzaehlen, DANN den Multiplikator bilden — so zahlt das 5./10./…
+        // Fass die neue Stufe schon selbst aus (arcade-typischer Moment statt erst beim naechsten Fass).
+        const mVor=comboMult();
+        combo++; if(combo>comboBest) comboBest=combo;
+        const m=comboMult();
+        if(m>mVor){ comboFlash=1; sfx('combo'); }   // Stufenaufstieg hoerbar + sichtbar
+        const jp=BARREL_TYPES[b.type].pts*level*m;
         score+=jp;
-        addFloat(P.x+P.w/2,P.y-12,'+'+jp+' '+BARREL_TYPES[b.type].label+'!');sfx('bonus');
+        addFloat(P.x+P.w/2,P.y-12,'+'+jp+' '+BARREL_TYPES[b.type].label+(m>1?' x'+m:'!'));
+        if(m===mVor) sfx('bonus');                  // bei Stufenaufstieg klingt schon 'combo'
       }
     }
     b.frameT+=dt;
@@ -1465,7 +1506,7 @@ function drawAppSkyline(){
   if(appDoneTimer>0){                                                   // kurzer "APP FERTIG!"-Moment, neben der Skyline
     cx.globalAlpha=Math.min(1,appDoneTimer);
     cx.fillStyle=C.yel; cx.font='7px "Press Start 2P"'; cx.textAlign='left';
-    cx.fillText('APP RELEASED!', 6, 66); // v0.11 (E-095): released trägt die Metapher
+    cx.fillText('APP RELEASED!  +'+appBonusLast, 6, 66); // v0.11 (E-095): released trägt die Metapher; v0.11.33: Bonus mit anzeigen (sonst unsichtbarer Punktesprung). Links ab x6, 7px — kollidiert nicht mit SND_BOX (ab x374)
     cx.globalAlpha=1;
   }
 }
@@ -1480,6 +1521,20 @@ function drawHUD(){
   cx.textAlign='left';
   cx.fillStyle=C.yel;cx.font='8px "Press Start 2P"'; cx.fillText('SCORE',6,13);
   cx.fillStyle=C.wht;cx.font='9px "Press Start 2P"'; cx.fillText(String(score).padStart(6,'0'),6,27);
+
+  // v0.11.34 (Serien-Bonus): Serien-Anzeige zwischen Score und Leben — nur sichtbar, solange eine Serie laeuft
+  // (dauerhaftes "SERIE 0" waere reines Rauschen). Platz geprueft: Score endet bei 9px-Font/7 Stellen bei x~69,
+  // die Leben-Sprites beginnen mittig erst bei x~181. Ab Multiplikator >1 wird die Zeile gelb + beim Stufen-
+  // aufstieg kurz groesser (comboFlash) — das ist der Moment, den der Spieler mitbekommen muss.
+  if(combo>0){
+    const m=comboMult(), fl=Math.min(1,comboFlash);
+    cx.textAlign='left';
+    cx.fillStyle = m>1 ? C.yel : 'rgba(255,255,255,0.45)';
+    cx.font='8px "Press Start 2P"'; cx.fillText('SERIE',78,13);
+    cx.fillStyle = m>1 ? C.yel : C.wht;
+    cx.font=(9+Math.round(fl*3))+'px "Press Start 2P"';
+    cx.fillText(combo+(m>1?'  x'+m:''),78,27);
+  }
 
   // v0.11.5 (E-100/Lena D1): App/Feature-Zeile raus aus Zeile 1 (reiner Arcade-Rahmen: SCORE · Leben · BEST) — Fortschritt zieht in Zeile 2 (drawAppSkyline)
   // Lives — Mini-Spielerfiguren (v0.4.3) statt "5"-Kaesten
@@ -1568,6 +1623,13 @@ function drawOver(){
   cx.textAlign='center';
   cx.fillStyle=C.red;cx.font='20px "Press Start 2P"';cx.fillText('GAME OVER',GW/2,160);
   cx.fillStyle=C.wht;cx.font='8px "Press Start 2P"';
+  // v0.11.34: beste Serie des Runs — bewusst in die leere Zone zwischen Ueberschrift (y160) und Score (y220)
+  // gesetzt, damit der eng gepackte Statblock ab y220 (E-120b-Historie: dort entstand der Fehltipp-Bug) unberuehrt bleibt.
+  if(comboBest>0){
+    cx.fillStyle = comboBest>=10 ? C.yel : 'rgba(255,255,255,0.75)'; // ab 10 ist die Serie eine echte Leistung
+    cx.fillText('BESTE SERIE:  '+comboBest,GW/2,196);
+    cx.fillStyle=C.wht;
+  }
   cx.fillText('SCORE:  '+score,GW/2,220);
   cx.fillText('APPS LIVE:  '+appsShipped,GW/2,244); // v0.11 (E-095): Apps zählen, nicht Loops (Richard: Konsistenz bis zum Ende)
   cx.fillText('APP '+(appsShipped+1)+' · FEATURES '+featsIntoApp+'/'+appFeatsNeeded()+' · '+ACT_GOAL[act],GW/2,262); // v0.11.6 (E-104/Milo): Zaehler = erledigt/gesamt
@@ -1690,6 +1752,7 @@ function loop(ts){
     updateBarrels(dt);
     // v0.4.1 (CC#5): Render-Timer dt-basiert (120-Hz-stabil)
     if(hitFlash>0) hitFlash=Math.max(0,hitFlash-dt*3.6);
+    if(comboFlash>0) comboFlash=Math.max(0,comboFlash-dt*2); // v0.11.34: Stufenaufstieg-Blitz ~0,5 s
     if(shake>0) shake=Math.max(0,shake-dt); // v0.10 (E-067)
     kongWobble+=dt*0.18;
     if(kongThrowT>0) kongThrowT=Math.max(0,kongThrowT-dt);
